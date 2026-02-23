@@ -13,7 +13,9 @@ import json
 import mimetypes
 import os
 import random
+import re
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -22,6 +24,9 @@ BASE_URL = "https://yunwu.ai"
 GEMINI_MODEL = "gemini-3-pro-preview"
 SORA_MODEL_WITH_IMAGES = "sora-2-all"   # 图片参考 → 视频
 SORA_MODEL_TEXT_ONLY = "sora-2-all"    # 纯文本 → 视频（images 传 []）
+TIKHUB_BASE_URL = "https://api.tikhub.io"
+TIKHUB_HYBRID_PATH = "/api/v1/hybrid/video_data"
+
 MAX_VIDEO_SIZE_MB = 50  # Gemini inline_data 建议上限
 PROMPTS_PATH = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "prompts.md")
@@ -59,6 +64,98 @@ def _render(template: str, **kwargs) -> str:
     for k, v in kwargs.items():
         template = template.replace("{{" + k + "}}", v)
     return template
+
+
+def extract_video_url(text: str) -> str:
+    """从混合文本中提取抖音/TikTok 视频链接"""
+    # 匹配 http(s):// 开头的完整 URL，到空格/换行/中文字符结束
+    pattern = r'https?://[^\s\u4e00-\u9fff，。！？、]+'
+    matches = re.findall(pattern, text)
+    # 优先匹配抖音/TikTok 域名
+    preferred = [
+        m.rstrip('.,，。）)】』"\'')
+        for m in matches
+        if any(d in m for d in ('douyin.com', 'tiktok.com', 'v.douyin', 'vm.tiktok'))
+    ]
+    if preferred:
+        return preferred[0]
+    # 兜底：返回第一个 URL
+    if matches:
+        return matches[0].rstrip('.,，。）)】』"\'')
+    return text.strip()
+
+
+def download_video_from_url(share_url: str, tikhub_api_key: str) -> str:
+    """通过 TikHub hybrid 接口解析抖音/TikTok 分享链接，下载无水印视频到临时文件，返回本地路径"""
+    print(f"🔗 解析视频链接: {share_url}")
+
+    # Step1: 调 TikHub 解析真实视频 URL
+    encoded_url = urllib.request.quote(share_url, safe="")
+    api_url = f"{TIKHUB_BASE_URL}{TIKHUB_HYBRID_PATH}?url={encoded_url}&minimal=true"
+    req = urllib.request.Request(
+        api_url,
+        headers={"Authorization": f"Bearer {tikhub_api_key}", "Accept": "application/json"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        print(f"❌ TikHub 解析失败: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if result.get("code") != 200:
+        print(f"❌ TikHub 返回错误: {result}", file=sys.stderr)
+        sys.exit(1)
+
+    data = result.get("data", {})
+    video_data = data.get("video_data", {})
+
+    # 优先取无水印高质量版本，兼容抖音（字符串）和 TikTok（对象含 url_list）
+    nwm_hq = video_data.get("nwm_video_url_HQ")
+    if isinstance(nwm_hq, dict):
+        video_url = (nwm_hq.get("url_list") or [None])[0]
+    elif isinstance(nwm_hq, str) and nwm_hq.startswith("http"):
+        video_url = nwm_hq
+    else:
+        # fallback: nwm_video_url
+        nwm = video_data.get("nwm_video_url")
+        if isinstance(nwm, dict):
+            video_url = (nwm.get("url_list") or [None])[0]
+        elif isinstance(nwm, str) and nwm.startswith("http"):
+            video_url = nwm
+        else:
+            print(f"❌ 无法从 TikHub 响应中提取视频 URL，video_data={video_data}", file=sys.stderr)
+            sys.exit(1)
+
+    print(f"  ✅ 解析成功，开始下载...")
+
+    # Step2: 下载视频到临时文件
+    tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+    tmp_path = tmp.name
+    tmp.close()
+
+    try:
+        dl_req = urllib.request.Request(
+            video_url,
+            headers={"User-Agent": "Mozilla/5.0"},
+            method="GET",
+        )
+        with urllib.request.urlopen(dl_req, timeout=120) as resp, open(tmp_path, "wb") as f:
+            total = 0
+            while True:
+                chunk = resp.read(65536)
+                if not chunk:
+                    break
+                f.write(chunk)
+                total += len(chunk)
+        size_mb = total / (1024 * 1024)
+        print(f"  ✅ 下载完成 ({size_mb:.1f} MB) → {tmp_path}")
+        return tmp_path
+    except Exception as e:
+        os.unlink(tmp_path)
+        print(f"❌ 视频下载失败: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def load_env():
@@ -547,6 +644,7 @@ def main():
         """,
     )
     parser.add_argument("--video", metavar="PATH", help="本地视频文件（二创模式）")
+    parser.add_argument("--url", metavar="URL", help="抖音/TikTok 分享链接（自动下载后进入二创模式）")
     parser.add_argument("--prompt", metavar="TEXT", help="提示词（生产模式必填；二创模式为修改意见）")
     _default_images = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "image")
     parser.add_argument(
@@ -578,8 +676,8 @@ def main():
         args.images = None
 
     # 参数验证
-    if not args.video and not args.prompt:
-        parser.error("必须提供 --video（二创模式）或 --prompt（生产模式），至少其中之一")
+    if not args.video and not args.url and not args.prompt:
+        parser.error("必须提供 --video / --url（二创模式）或 --prompt（生产模式），至少其中之一")
 
     # 加载 API Key
     load_env()
@@ -594,9 +692,10 @@ def main():
         sys.exit(1)
     # YUNWU_GEMINI_API_KEY 用于 Gemini 调用，若未设置则回退到 YUNWU_API_KEY
     gemini_api_key = os.environ.get("YUNWU_GEMINI_API_KEY") or api_key
+    tikhub_api_key = os.environ.get("TIKHUB_API_KEY") or os.environ.get("tikhub_api_key")
 
     # 打印运行配置
-    mode = "二创（视频→Gemini→Sora）" if args.video else "生产（主题→Gemini→Sora）"
+    mode = "二创（视频→Gemini→Sora）" if (args.video or args.url) else "生产（主题→Gemini→Sora）"
     print(f"\n{'='*60}")
     print("🚀 短视频自动生成")
     print(f"{'='*60}")
@@ -604,10 +703,12 @@ def main():
     print(f"  方向:     {args.orientation}")
     print(f"  时长:     {args.duration}s")
     print(f"  数量:     {args.count}")
+    if args.url:
+        print(f"  链接:     {args.url}")
     if args.video:
         print(f"  视频:     {args.video}")
     if args.prompt:
-        label = "修改意见" if args.video else "提示词"
+        label = "修改意见" if (args.video or args.url) else "提示词"
         print(f"  {label}:  {args.prompt}")
     if args.images:
         print(f"  图片:     {args.images}")
@@ -615,6 +716,17 @@ def main():
 
     # 加载提示词配置
     prompts = load_prompts()
+
+    # --url 模式：先通过 TikHub 下载视频到临时文件
+    tmp_video_path = None
+    if args.url:
+        if not tikhub_api_key:
+            print("❌ 未找到 TIKHUB_API_KEY，请在 .env 添加：\n  TIKHUB_API_KEY=your_key", file=sys.stderr)
+            sys.exit(1)
+        clean_url = extract_video_url(args.url)
+        print(f"  提取链接: {clean_url}")
+        tmp_video_path = download_video_from_url(clean_url, tikhub_api_key)
+        args.video = tmp_video_path
 
     # 步骤一：获取脚本
     if args.video:
@@ -663,6 +775,10 @@ def main():
             print(f"  首评：{copy_data.get('first_comment', '')}")
     print(f"{'='*60}")
     print(f"完成: {success_count}/{len(results)} 个视频生成成功")
+
+    # 清理临时下载的视频文件
+    if tmp_video_path and os.path.exists(tmp_video_path):
+        os.unlink(tmp_video_path)
 
     if success_count < len(results):
         sys.exit(1)
