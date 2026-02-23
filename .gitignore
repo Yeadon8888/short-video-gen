@@ -1,0 +1,8 @@
+.env
+*.mp4
+*.mov
+*.avi
+image/image_cache.json
+scripts/__pycache__/
+**/*.pyc
+.DS_Store
