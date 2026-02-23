@@ -94,7 +94,11 @@ def download_video_from_url(share_url: str, tikhub_api_key: str) -> str:
     api_url = f"{TIKHUB_BASE_URL}{TIKHUB_HYBRID_PATH}?url={encoded_url}&minimal=true"
     req = urllib.request.Request(
         api_url,
-        headers={"Authorization": f"Bearer {tikhub_api_key}", "Accept": "application/json"},
+        headers={
+            "Authorization": f"Bearer {tikhub_api_key}",
+            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
         method="GET",
     )
     try:
