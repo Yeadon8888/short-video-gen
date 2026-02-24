@@ -342,35 +342,31 @@ def upload_image(filepath: str, images_dir: str = None) -> str | None:
         f"SignedHeaders={signed_headers}, Signature={signature}"
     )
 
-    req = urllib.request.Request(
-        f"https://{host}{uri}",
-        data=file_data,
-        headers={
-            "Content-Type": mime,
-            "Host": host,
-            "x-amz-content-sha256": payload_hash,
-            "x-amz-date": amz_date,
-            "Authorization": auth,
-        },
-        method="PUT",
-    )
     try:
-        ssl_ctx = ssl.create_default_context()
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = ssl.CERT_NONE
-        with urllib.request.urlopen(req, timeout=60, context=ssl_ctx) as resp:
-            if resp.status in (200, 204):
-                url = f"https://{public_domain}/{filename}"
-                # 写入缓存
-                if images_dir:
-                    cache[md5] = url
-                    _save_cache(images_dir, cache)
-                return url
-            raise Exception(f"HTTP {resp.status}")
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        print(f"  ⚠️  R2 上传失败 ({os.path.basename(filepath)}): {e.code} {body}", file=sys.stderr)
-        return None
+        result = subprocess.run(
+            [
+                "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+                "--noproxy", "*", "--max-time", "60",
+                "-X", "PUT",
+                "-H", f"Content-Type: {mime}",
+                "-H", f"Host: {host}",
+                "-H", f"x-amz-content-sha256: {payload_hash}",
+                "-H", f"x-amz-date: {amz_date}",
+                "-H", f"Authorization: {auth}",
+                "--data-binary", f"@{filepath}",
+                f"https://{host}{uri}",
+            ],
+            capture_output=True,
+            timeout=70,
+        )
+        http_code = result.stdout.decode("utf-8").strip()
+        if http_code in ("200", "204"):
+            url = f"https://{public_domain}/{filename}"
+            if images_dir:
+                cache[md5] = url
+                _save_cache(images_dir, cache)
+            return url
+        raise Exception(f"HTTP {http_code}, stderr: {result.stderr.decode('utf-8', errors='replace')}")
     except Exception as e:
         print(f"  ⚠️  R2 上传失败 ({os.path.basename(filepath)}): {e}", file=sys.stderr)
         return None
@@ -598,7 +594,10 @@ def create_video_tasks(api_key, prompt, image_urls, orientation, duration, count
             "private": False,
         }
         result = api_request("POST", "/v1/video/create", api_key, data=payload)
-        task_id = result["id"]
+        task_id = result.get("id")
+        if not task_id:
+            print(f"❌ 创建任务失败，API 响应: {result}", file=sys.stderr)
+            sys.exit(1)
         status = result.get("status", "unknown")
         task_ids.append(task_id)
         print(f"  ✅ 任务已提交: {task_id}（当前状态: {status}）")
@@ -606,16 +605,23 @@ def create_video_tasks(api_key, prompt, image_urls, orientation, duration, count
     return task_ids
 
 
-def poll_tasks(api_key, task_ids, poll_interval=30):
-    """轮询任务状态，直到全部完成或失败"""
+def poll_tasks(api_key, task_ids, poll_interval=30, max_wait=1800):
+    """轮询任务状态，直到全部完成或失败，最多等待 max_wait 秒（默认 30 分钟）"""
     terminal_statuses = {"succeeded", "completed", "success", "failed", "error", "cancelled"}
     results = {}
     pending = set(task_ids)
+    elapsed = 0
 
-    print(f"\n⏳ 等待视频生成（每 {poll_interval} 秒轮询一次）...")
+    print(f"\n⏳ 等待视频生成（每 {poll_interval} 秒轮询一次，最多等待 {max_wait // 60} 分钟）...")
 
     while pending:
         time.sleep(poll_interval)
+        elapsed += poll_interval
+        if elapsed > max_wait:
+            for task_id in pending:
+                print(f"  ⏰ 任务 {task_id[:30]}... 等待超时，标记为失败")
+                results[task_id] = {"success": False, "url": None, "status": "timeout"}
+            break
         for task_id in list(pending):
             result = api_request(
                 "GET",
@@ -688,7 +694,7 @@ def main():
         choices=[10, 15],
         help="视频时长（秒），默认 15",
     )
-    parser.add_argument("--count", type=int, default=1, help="生成数量，默认 1")
+    parser.add_argument("--count", type=int, default=1, help="生成数量，默认 1，最多 10")
     parser.add_argument("--random-image", action="store_true", help="从图片文件夹随机选一张，默认用第一张")
 
     args = parser.parse_args()
@@ -700,6 +706,8 @@ def main():
     # 参数验证
     if not args.video and not args.url and not args.prompt:
         parser.error("必须提供 --video / --url（二创模式）或 --prompt（生产模式），至少其中之一")
+    if args.count < 1 or args.count > 10:
+        parser.error("--count 范围为 1–10")
 
     # 加载 API Key
     load_env()
