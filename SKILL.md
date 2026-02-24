@@ -1,113 +1,158 @@
 ---
 name: short-video-gen
-description: 短视频自动生成。支持「二创」模式（上传本地视频→Gemini分析→Sora-2-all生成新视频）和「生产」模式（直接用提示词生成）。支持上传产品图片参考。用户提到"生成短视频"、"视频二创"、"sora生成视频"、"产品视频"时使用。
+description: 短视频自动生成。支持抖音/TikTok 链接二创、本地视频二创、主题生产三种模式，自动生成配套标题/文案/首评。用户提到"生成短视频"、"视频二创"、"sora生成视频"、"产品视频"、"帮我用这个链接生成视频"时使用。
 ---
 
 # 短视频自动生成
 
-通过 yunwu.ai 调用 Gemini（视频理解）+ Sora-2-all（视频生成）的完整工作流。
+通过 yunwu.ai 调用 Gemini（视频理解）+ Sora-2-all（视频生成）的完整工作流。支持三种模式：抖音/TikTok 链接二创、本地视频二创、主题生产。
 
-## 入参说明
+## 参数说明
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `--video <路径>` | 本地视频文件路径（触发**二创模式**） | — |
-| `--prompt <文本>` | 提示词（**生产模式**必填；二创模式为修改意见） | — |
-| `--images <文件夹>` | 产品图片文件夹；默认使用 skill 目录下的 `image/`；传 `0` 表示不使用产品图 | `image/`（默认） |
+| `--url <文本>` | 抖音/TikTok 分享链接，**支持直接粘贴含表情/中文/话题标签的完整分享文字** | — |
+| `--video <路径>` | 本地视频文件路径 | — |
+| `--prompt <文本>` | 生产模式必填；二创模式为修改意见 | — |
+| `--images <文件夹>` | 产品图片文件夹；传 `0` 不使用产品图 | skill 目录下的 `image/` |
 | `--orientation` | `portrait`（竖屏）/ `landscape`（横屏） | `portrait` |
 | `--duration` | `10` / `15`（秒） | `15` |
-| `--count` | 生成视频数量 | `1` |
+| `--count` | 生成视频数量（1–10） | `1` |
+| `--random-image` | 从图片文件夹随机选一张（不加则用第一张） | 否 |
 
 **模式判断：**
-- 提供 `--video` → 二创模式（Gemini 分析视频 → 生成脚本 → Sora 生成）
-- 只有 `--prompt` → 生产模式（直接用 prompt → Sora 生成）
-- 两者都没有 → 提示用户补充参数
+- 提供 `--url` → 自动提取链接 → TikHub 下载原视频 → Gemini 分析 → Sora 生成
+- 提供 `--video` → Gemini 分析本地视频 → Sora 生成
+- 只有 `--prompt` → Gemini 扩展主题 → Sora 生成（生产模式）
 
-**图片选择逻辑（`--images` 文件夹）：**
-- 1 张 → 使用该张
-- 2–3 张 → 全部使用
-- > 3 张 → 随机选 1 张
+## 前置条件：.env 文件
 
-## 前置条件
+脚本从**运行目录**自动加载 `.env`。使用前确认用户运行目录有 `.env`，或 skill 目录下有 `.env`。
 
-在用户当前项目目录确保存在 `.env` 文件，包含：
+必填：
 ```
-YUNWU_API_KEY=your_key_here
+YUNWU_API_KEY=sk-...        # 云雾 AI，用于 Gemini + Sora
 ```
 
-如果不存在，提示用户创建，再继续执行。
+按需填写：
+```
+YUNWU_GEMINI_API_KEY=sk-... # 单独的 Gemini Key，不填则复用 YUNWU_API_KEY
+TIKHUB_API_KEY=...          # 使用 --url 时必填，用于解析抖音/TikTok 链接
+R2_ACCOUNT_ID=...           # Cloudflare R2（产品图托管），不填则跳过图片上传
+R2_BUCKET=...
+R2_PUBLIC_DOMAIN=...
+S3_ID=...
+S3_token=...
+```
 
-## 执行流程
+如果 `.env` 不存在或缺少 `YUNWU_API_KEY`，脚本会报错退出并提示用户添加。
 
-### 1. 解析用户输入
+## 执行方式
 
-将用户提供的参数映射到对应的 `--` 命令行参数。用户可能用自然语言描述，需要提取关键信息：
-- 视频文件路径
-- 提示词或修改意见
-- 图片文件夹路径
-- 方向/时长/数量偏好
-
-### 2. 运行脚本
-
-使用此技能目录下的 `scripts/generate.py` 脚本执行完整流程：
+**必须从 skill 目录运行**（脚本自动加载该目录的 `.env`）：
 
 ```bash
 SKILL_DIR="$HOME/.claude/skills/short-video-gen"
+cd "$SKILL_DIR"
 
-python3 "$SKILL_DIR/scripts/generate.py" \
+python3 scripts/generate.py \
+  [--url "<分享文字或链接>"] \
   [--video <视频路径>] \
-  [--prompt "<提示词>"] \
-  [--images <图片文件夹>] \
+  [--prompt "<提示词或修改意见>"] \
+  [--images <图片文件夹 或 0>] \
   [--orientation portrait|landscape] \
   [--duration 10|15] \
-  [--count N]
+  [--count 1-10] \
+  [--random-image]
 ```
 
-从用户的当前工作目录运行（脚本会自动从 cwd 加载 `.env`）。
+> 视频路径如果是相对路径，需相对于 skill 目录。如果用户给的是绝对路径则直接用。
 
-### 3. 展示结果
+## 场景示例
 
-脚本运行完毕后：
-- 成功：展示视频 URL，告知用户可下载或在浏览器中预览
-- 失败：展示错误信息，建议排查 API Key 或网络连接
-
-## 常见场景示例
-
-**场景 1：上传视频做二创**
-用户说："帮我用 demo.mp4 生成一个竖屏短视频"
+**场景 1：抖音链接二创（直接粘贴分享文字）**
 ```bash
-python3 "$SKILL_DIR/scripts/generate.py" --video demo.mp4
+cd "$HOME/.claude/skills/short-video-gen"
+python3 scripts/generate.py \
+  --url "5.33 lPX:/ 小猫咪洗头 #AI创作 https://v.douyin.com/xxx/ 复制此链接..."
 ```
 
-**场景 2：二创 + 修改意见 + 产品图**
-用户说："用 demo.mp4 二创，改成更明亮的色调，参考 ./imgs 里的产品图"
+**场景 2：链接二创 + 修改意见**
 ```bash
-python3 "$SKILL_DIR/scripts/generate.py" \
-  --video demo.mp4 \
+cd "$HOME/.claude/skills/short-video-gen"
+python3 scripts/generate.py \
+  --url "https://v.douyin.com/xxx/" \
+  --prompt "把里面的人换成猫咪"
+```
+
+**场景 3：本地视频二创**
+```bash
+cd "$HOME/.claude/skills/short-video-gen"
+python3 scripts/generate.py --video /path/to/demo.mp4
+```
+
+**场景 4：本地视频二创 + 修改意见 + 自定义产品图**
+```bash
+cd "$HOME/.claude/skills/short-video-gen"
+python3 scripts/generate.py \
+  --video /path/to/demo.mp4 \
   --prompt "更明亮的色调，加快节奏" \
-  --images ./imgs
+  --images /path/to/imgs
 ```
 
-**场景 3：直接生产模式**
-用户说："生成一个产品展示视频，横屏，10秒"
+**场景 5：生产模式（主题扩展）**
 ```bash
-python3 "$SKILL_DIR/scripts/generate.py" \
-  --prompt "A sleek product showcase with cinematic lighting and smooth camera movements" \
+cd "$HOME/.claude/skills/short-video-gen"
+python3 scripts/generate.py \
+  --prompt "一只猫咪在吉隆坡街头跳舞" \
   --orientation landscape \
   --duration 10
 ```
 
-**场景 4：批量生成**
-用户说："生成 3 个不同版本的视频"
+**场景 6：批量生成（最多 10 个）**
 ```bash
-python3 "$SKILL_DIR/scripts/generate.py" \
-  --video demo.mp4 \
+cd "$HOME/.claude/skills/short-video-gen"
+python3 scripts/generate.py \
+  --url "https://v.douyin.com/xxx/" \
   --count 3
 ```
 
+**场景 7：不使用产品图**
+```bash
+cd "$HOME/.claude/skills/short-video-gen"
+python3 scripts/generate.py --video /path/to/demo.mp4 --images 0
+```
+
+## 输出结果
+
+脚本成功完成后输出：
+1. **视频 URL**：可直接在浏览器打开或下载（阿里云 OSS 链接）
+2. **视频文案**：标题 + 正文文案（含话题标签）+ 首评
+
+示例输出：
+```
+✅ https://midjourney-plus.oss-us-west-1.aliyuncs.com/xxx.mp4
+
+📋 视频文案
+  标题：...
+  文案：... #glumoo #NAG
+  首评：... #glumoo #NAG
+```
+
+## 常见错误排查
+
+| 错误信息 | 原因 | 解决方法 |
+|---------|------|---------|
+| `未找到 YUNWU_API_KEY` | .env 不存在或未填 Key | 在运行目录创建 `.env` 并填入 Key |
+| `未找到 TIKHUB_API_KEY` | 使用 --url 但未配置 | 在 `.env` 添加 `TIKHUB_API_KEY=...` |
+| `TikHub 返回空响应` | Key 无效 / 网络不通 / 链接失效 | 检查 Key 是否正确，确认链接可访问 |
+| `TikHub 返回非 JSON` | Key 格式错误或无权限 | 重新检查 TIKHUB_API_KEY |
+| `视频文件不存在` | 路径错误 | 使用绝对路径，或确认相对路径正确 |
+| `Gemini API 超时` | 视频文件过大（>50MB） | 压缩视频后重试 |
+
 ## 注意事项
 
-- 视频文件建议 < 50 MB，过大会导致 Gemini API 超时
-- 图片上传通过 catbox.moe 中转获取公开 URL，属免费服务
-- Sora 视频生成是异步任务，脚本每 30 秒轮询一次，通常需等待 2–5 分钟
-- `images` 字段在无产品图时传空数组 `[]`，请确认 yunwu.ai 是否支持该用法
+- Sora 视频生成为异步任务，每 30 秒轮询一次，通常需等待 2–5 分钟，最长 30 分钟超时
+- 产品图默认使用 skill 目录下的 `image/` 文件夹，图片会上传到 Cloudflare R2 并缓存
+- `--count` 最多 10，超出会直接报错
+- 提示词风格可在 `prompts.md` 中修改，无需动代码
