@@ -106,13 +106,27 @@ def download_video_from_url(share_url: str, tikhub_api_key: str) -> str:
             capture_output=True,
             timeout=35,
         )
-        result = json.loads(curl_result.stdout.decode("utf-8"))
+        raw = curl_result.stdout.decode("utf-8").strip()
+        if not raw:
+            stderr = curl_result.stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(
+                f"TikHub 返回空响应（curl exit={curl_result.returncode}）\n"
+                f"  可能原因：TIKHUB_API_KEY 无效、网络不通、或链接已失效\n"
+                f"  curl stderr: {stderr or '(无)'}"
+            )
+        result = json.loads(raw)
+    except json.JSONDecodeError:
+        print(
+            f"❌ TikHub 返回非 JSON 响应（可能是 HTML 错误页，Key 可能无效）:\n  {raw[:200]}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     except Exception as e:
         print(f"❌ TikHub 解析失败: {e}", file=sys.stderr)
         sys.exit(1)
 
     if result.get("code") != 200:
-        print(f"❌ TikHub 返回错误: {result}", file=sys.stderr)
+        print(f"❌ TikHub 返回错误 (code={result.get('code')}): {result.get('message', result)}", file=sys.stderr)
         sys.exit(1)
 
     data = result.get("data", {})
