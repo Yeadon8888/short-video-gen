@@ -36,9 +36,9 @@ TIKHUB_BASE_URL = "https://api.tikhub.io"
 TIKHUB_HYBRID_PATH = "/api/v1/hybrid/video_data"
 
 MAX_VIDEO_SIZE_MB = 50  # Gemini inline_data 建议上限
-PROMPTS_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "prompts.md")
-)
+_SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROMPTS_PATH = os.path.join(_SKILL_DIR, "prompts.md")
+PROMPTS_EXAMPLE_PATH = os.path.join(_SKILL_DIR, "prompts.md.example")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -80,10 +80,11 @@ def _sleep_with_heartbeat(total_seconds: int, elapsed_total: int, interval: int 
 # ──────────────────────────────────────────────────────────────────────────────
 
 def load_prompts() -> dict:
-    """从 prompts.md 加载提示词模板，返回 {KEY: 模板字符串} 字典"""
-    if not os.path.exists(PROMPTS_PATH):
+    """从 prompts.md 加载提示词模板，不存在时回退到 prompts.md.example"""
+    path = PROMPTS_PATH if os.path.exists(PROMPTS_PATH) else PROMPTS_EXAMPLE_PATH
+    if not os.path.exists(path):
         return {}
-    with open(PROMPTS_PATH, encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         content = f.read()
     prompts: dict = {}
     current_key: str | None = None

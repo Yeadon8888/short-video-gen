@@ -7,7 +7,8 @@ image/image_cache.json
 image/*.png
 image/*.jpg
 !image/sample_product.jpg
-# 公司专属 prompt（本地保存为 prompts.local.md）
+# 公司专属 prompt（本地实际使用，不提交）
+prompts.md
 prompts.local.md
 scripts/__pycache__/
 **/*.pyc
