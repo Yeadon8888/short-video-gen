@@ -205,9 +205,9 @@ Sora 真实感规范（用于原创）
 
 文案（caption）： 必须是适合社交平台分发的推广文案，带有强烈的情绪感染力（如：治愈、震撼、反差等），精准切中用户痛点或爽点。字数严格控制在 50–100 字（或单词） 之间。
 
-强制品牌标签： 文案的末尾必须带有相关话题标签，其中 #glumoo 和 #NAG 是必须携带的硬性标签，不可遗漏。
+强制品牌标签： 文案的末尾必须带有相关话题标签，其中 #glumoo #NAGLUMOO 和 #NAG 是必须携带的硬性标签，不可遗漏。
 
-首评（first_comment）： 为视频配套生成一条发布者自己的首条评论，用于补充文案信息或引导互动，字数控制在 30–60 字（或单词），结尾同样必须携带 #glumoo 和 #NAG。
+首评（first_comment）： 为视频配套生成一条发布者自己的首条评论，用于补充文案信息或引导互动，字数控制在 30–60 字（或单词），结尾同样必须携带 #glumoo #NAGLUMOO 和 #NAG。
 
 输出格式限制（机器读取级）： 你的输出将被用于自动化代码解析。必须且只能输出一个合法的 JSON 对象。
 
@@ -227,6 +227,6 @@ Sora 真实感规范（用于原创）
 优秀输出案例（Few-shot 学习）
 （假设 {{SORA_PROMPT}} 的内容是：一只毛发柔亮、原本懒洋洋的猫咪，在充满热带阳光的客厅里突然展现出惊人的跳跃力与活力，动作生动逼真，光影自然。）
 
-{"title": "Never thought my cat could fly! 🚀🐱","caption": "This little guy has been absolutely unstoppable lately! Look at that incredibly shiny coat and his endless energy weh 😭 I finally found the ultimate secret to keeping him active, happy, and super healthy every single day. Say goodbye to lazy, sleepy afternoons! #glumoo #NAG #catsoftiktok #pethealth","first_comment": "Drop a 🐱 if your cat also has secret superpowers! We're so glad we found what works for him — the difference is unreal. #glumoo #NAG"}
+{"title": "Never thought my cat could fly! 🚀🐱","caption": "This little guy has been absolutely unstoppable lately! Look at that incredibly shiny coat and his endless energy weh 😭 I finally found the ultimate secret to keeping him active, happy, and super healthy every single day. Say goodbye to lazy, sleepy afternoons! #glumoo #NAGLUMOO #NAG #catsoftiktok #pethealth","first_comment": "Drop a 🐱 if your cat also has secret superpowers! We're so glad we found what works for him — the difference is unreal. #glumoo #NAGLUMOO #NAG"}
 
 】
