@@ -11,5 +11,11 @@ image/*.jpg
 prompts.md
 prompts.local.md
 scripts/__pycache__/
+scripts/lib/__pycache__/
 **/*.pyc
 .DS_Store
+
+# Web app
+web/.next/
+web/node_modules/
+web/.env.local
