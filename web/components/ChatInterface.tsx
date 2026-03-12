@@ -30,7 +30,13 @@ interface SSEEvent {
   sora_prompt?: string;
 }
 
+const INVITE_CODE = "1214";
+const INVITE_STORAGE_KEY = "vidclaw_invite_verified";
+
 export default function ChatInterface() {
+  const [authorized, setAuthorized] = useState(false);
+  const [inviteInput, setInviteInput] = useState("");
+  const [inviteError, setInviteError] = useState("");
   const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -53,8 +59,24 @@ export default function ChatInterface() {
   }, [messages]);
 
   useEffect(() => {
+    if (typeof window !== "undefined" && localStorage.getItem(INVITE_STORAGE_KEY) === "true") {
+      setAuthorized(true);
+    }
+  }, []);
+
+  useEffect(() => {
     setWorkspaceId(getBrowserWorkspaceId());
   }, []);
+
+  function handleInviteSubmit() {
+    if (inviteInput.trim() === INVITE_CODE) {
+      localStorage.setItem(INVITE_STORAGE_KEY, "true");
+      setAuthorized(true);
+      setInviteError("");
+    } else {
+      setInviteError("邀请码不正确，请重新输入");
+    }
+  }
 
   useEffect(() => {
     if (workspaceId) {
@@ -236,6 +258,54 @@ export default function ChatInterface() {
       e.preventDefault();
       handleSend();
     }
+  }
+
+  if (!authorized) {
+    return (
+      <div
+        className="flex items-center justify-center h-screen"
+        style={{ background: "#0A0A0F" }}
+      >
+        <div
+          className="flex flex-col items-center gap-6 p-8 rounded-2xl w-full max-w-sm"
+          style={{ background: "#13131A", border: "1px solid #1E1E2E" }}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">⚡</span>
+            <span className="text-xl font-semibold gradient-text">VidClaw</span>
+          </div>
+          <p className="text-slate-400 text-sm text-center">
+            请输入邀请码以继续使用
+          </p>
+          <input
+            type="text"
+            value={inviteInput}
+            onChange={(e) => {
+              setInviteInput(e.target.value);
+              setInviteError("");
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleInviteSubmit();
+            }}
+            placeholder="请输入邀请码"
+            className="w-full px-4 py-2.5 rounded-lg text-sm text-white placeholder-slate-500 outline-none focus:ring-2 focus:ring-purple-500"
+            style={{ background: "#0A0A0F", border: "1px solid #2A2A3E" }}
+          />
+          {inviteError && (
+            <p className="text-red-400 text-xs">{inviteError}</p>
+          )}
+          <button
+            onClick={handleInviteSubmit}
+            className="w-full py-2.5 rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90"
+            style={{
+              background: "linear-gradient(135deg, #7C3AED, #3B82F6)",
+            }}
+          >
+            验证
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
