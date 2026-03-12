@@ -65,7 +65,7 @@ export default function ParamBar({ params, onChange }: ParamBarProps) {
       />
       <Select
         value={params.count}
-        options={[1, 2, 3].map((n) => ({ value: n, label: `×${n}` }))}
+        options={[1, 2, 3, 5, 10].map((n) => ({ value: n, label: `×${n}` }))}
         onChange={(v) => onChange({ ...params, count: v as number })}
       />
       <span className="text-xs text-slate-500">默认模型: `sora-2`</span>

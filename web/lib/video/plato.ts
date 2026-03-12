@@ -11,7 +11,7 @@ function getBaseUrl(): string {
     process.env.VIDEO_BASE_URL ||
     process.env.PLATO_BASE_URL ||
     DEFAULT_BASE_URL
-  ).replace(/\/+$/, "");
+  ).trim().replace(/\/+$/, "");
 }
 
 function getApiKey(): string {
@@ -19,7 +19,7 @@ function getApiKey(): string {
     process.env.VIDEO_API_KEY ||
     process.env.PLATO_API_KEY ||
     ""
-  );
+  ).trim();
 }
 
 function getModel(): string {
