@@ -12,10 +12,16 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ urls: [], gateway_enabled: false });
   }
 
-  const workspaceId = getWorkspaceIdFromHeaders(req.headers);
-  const urls = await listAssets(workspaceId);
-
-  return NextResponse.json({ urls, gateway_enabled: true });
+  try {
+    const workspaceId = getWorkspaceIdFromHeaders(req.headers);
+    const urls = await listAssets(workspaceId);
+    return NextResponse.json({ urls, gateway_enabled: true });
+  } catch (e) {
+    return NextResponse.json(
+      { urls: [], gateway_enabled: true, error: String(e) },
+      { status: 502 },
+    );
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -23,22 +29,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Upload gateway not configured" }, { status: 503 });
   }
 
-  const workspaceId = getWorkspaceIdFromHeaders(req.headers);
-  const formData = await req.formData();
-  const file = formData.get("file") as File | null;
-  if (!file) {
-    return NextResponse.json({ error: "No file provided" }, { status: 400 });
+  try {
+    const workspaceId = getWorkspaceIdFromHeaders(req.headers);
+    const formData = await req.formData();
+    const file = formData.get("file") as File | null;
+    if (!file) {
+      return NextResponse.json({ error: "No file provided" }, { status: 400 });
+    }
+
+    const buffer = await file.arrayBuffer();
+    const asset = await uploadAsset({
+      workspaceId,
+      filename: file.name,
+      data: buffer,
+      contentType: file.type || "application/octet-stream",
+    });
+
+    return NextResponse.json(asset);
+  } catch (e) {
+    return NextResponse.json({ error: String(e) }, { status: 502 });
   }
-
-  const buffer = await file.arrayBuffer();
-  const asset = await uploadAsset({
-    workspaceId,
-    filename: file.name,
-    data: buffer,
-    contentType: file.type || "application/octet-stream",
-  });
-
-  return NextResponse.json(asset);
 }
 
 export async function DELETE(req: NextRequest) {

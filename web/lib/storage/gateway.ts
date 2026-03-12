@@ -61,23 +61,19 @@ async function requestJson<T>(params: {
   timeoutSeconds?: number;
 }): Promise<T> {
   if (!shouldPreferCurl()) {
-    try {
-      const response = await fetch(params.url, {
-        method: params.method,
-        headers: params.headers,
-        body: params.body,
-        signal: AbortSignal.timeout((params.timeoutSeconds ?? 60) * 1000),
-        cache: "no-store",
-      });
+    const response = await fetch(params.url, {
+      method: params.method,
+      headers: params.headers,
+      body: params.body,
+      signal: AbortSignal.timeout((params.timeoutSeconds ?? 60) * 1000),
+      cache: "no-store",
+    });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      return (await response.json()) as T;
-    } catch {
-      // Fall through to curl for hostile local proxy environments.
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
     }
+
+    return (await response.json()) as T;
   }
 
   const curlArgs = [
