@@ -3,8 +3,8 @@
  * Mirrors the Python gemini.py but outputs structured ScriptResult JSON
  */
 
-const GEMINI_MODEL = "gemini-3-pro-preview";
-const BASE_URL = "https://yunwu.ai";
+const GEMINI_MODEL = "gemini-3.1-pro-preview";
+const DEFAULT_BASE_URL = "https://yunwu.ai";
 
 export interface Shot {
   id: number;
@@ -29,17 +29,22 @@ export interface ScriptResult {
 
 function getApiKey(): string {
   return (
+    process.env.GEMINI_API_KEY ||
     process.env.YUNWU_GEMINI_API_KEY ||
     process.env.YUNWU_API_KEY ||
     ""
   );
 }
 
+function getBaseUrl(): string {
+  return process.env.GEMINI_BASE_URL || DEFAULT_BASE_URL;
+}
+
 async function geminiRequest(payload: object): Promise<unknown> {
   const apiKey = getApiKey();
-  if (!apiKey) throw new Error("YUNWU_GEMINI_API_KEY or YUNWU_API_KEY is not set");
+  if (!apiKey) throw new Error("GEMINI_API_KEY or YUNWU_GEMINI_API_KEY or YUNWU_API_KEY is not set");
 
-  const url = `${BASE_URL}/v1beta/models/${GEMINI_MODEL}:generateContent`;
+  const url = `${getBaseUrl()}/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
   for (let attempt = 0; attempt < 3; attempt++) {
     try {

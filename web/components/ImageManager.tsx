@@ -10,26 +10,34 @@ interface ImageItem {
 interface ImageManagerProps {
   isOpen: boolean;
   onClose: () => void;
+  workspaceId: string;
+  onImagesChange?: (count: number, enabled: boolean) => void;
 }
 
-export default function ImageManager({ isOpen, onClose }: ImageManagerProps) {
+export default function ImageManager({ isOpen, onClose, workspaceId, onImagesChange }: ImageManagerProps) {
   const [images, setImages] = useState<ImageItem[]>([]);
-  const [r2Enabled, setR2Enabled] = useState(true);
+  const [gatewayEnabled, setGatewayEnabled] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (isOpen) fetchImages();
-  }, [isOpen]);
+    if (isOpen && workspaceId) fetchImages();
+  }, [isOpen, workspaceId]);
 
   async function fetchImages() {
+    if (!workspaceId) return;
     setLoading(true);
     try {
-      const res = await fetch("/api/images");
+      const res = await fetch("/api/images", {
+        headers: {
+          "x-workspace-id": workspaceId,
+        },
+      });
       const data = await res.json();
       setImages(data.urls ?? []);
-      setR2Enabled(data.r2_enabled ?? false);
+      setGatewayEnabled(data.gateway_enabled ?? false);
+      onImagesChange?.((data.urls ?? []).length, data.gateway_enabled ?? false);
     } finally {
       setLoading(false);
     }
@@ -37,12 +45,18 @@ export default function ImageManager({ isOpen, onClose }: ImageManagerProps) {
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !workspaceId) return;
     setUploading(true);
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const res = await fetch("/api/images", { method: "POST", body: formData });
+      const res = await fetch("/api/images", {
+        method: "POST",
+        headers: {
+          "x-workspace-id": workspaceId,
+        },
+        body: formData,
+      });
       if (res.ok) {
         await fetchImages();
       }
@@ -53,9 +67,13 @@ export default function ImageManager({ isOpen, onClose }: ImageManagerProps) {
   }
 
   async function handleDelete(key: string) {
+    if (!workspaceId) return;
     const res = await fetch("/api/images", {
       method: "DELETE",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-workspace-id": workspaceId,
+      },
       body: JSON.stringify({ key }),
     });
     if (res.ok) {
@@ -92,16 +110,16 @@ export default function ImageManager({ isOpen, onClose }: ImageManagerProps) {
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {!r2Enabled && (
+          {!gatewayEnabled && (
             <div
               className="rounded-xl p-4 text-sm text-amber-400"
               style={{ background: "#D97706" + "11", border: "1px solid #D97706" + "44" }}
             >
-              R2 存储未配置，图片功能不可用。请在 .env.local 中设置 R2 相关变量。
+              上传网关未配置，图片功能不可用。请在 `.env.local` 中设置 `UPLOAD_API_URL` 和 `UPLOAD_API_KEY`。
             </div>
           )}
 
-          {r2Enabled && (
+          {gatewayEnabled && (
             <>
               <p className="text-xs text-slate-400">
                 上传的图片会作为视频生成的视觉参考，建议上传产品图或风格参考图。
@@ -145,7 +163,7 @@ export default function ImageManager({ isOpen, onClose }: ImageManagerProps) {
           )}
         </div>
 
-        {r2Enabled && (
+        {gatewayEnabled && (
           <div className="p-4" style={{ borderTop: "1px solid #1E1E2E" }}>
             <input
               ref={fileInputRef}
@@ -156,7 +174,7 @@ export default function ImageManager({ isOpen, onClose }: ImageManagerProps) {
             />
             <button
               onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
+              disabled={uploading || !workspaceId}
               className="w-full py-3 rounded-xl font-medium text-white transition-all disabled:opacity-50"
               style={{
                 background: "linear-gradient(135deg, #7C3AED, #2563EB)",

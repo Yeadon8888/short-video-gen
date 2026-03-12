@@ -36,7 +36,7 @@ interface MessageBubbleProps {
 
 const STAGE_LABELS: Record<string, string> = {
   ANALYZE: "Gemini 分析中...",
-  GENERATE: "提交 Sora 任务...",
+  GENERATE: "提交柏拉图视频任务...",
   POLL: "等待视频生成...",
 };
 

@@ -2,8 +2,6 @@
 
 import { useState } from "react";
 
-const SORA_URL = "https://sora.yeadon.top";
-
 interface FallbackNoticeProps {
   soraPrompt: string;
   message?: string;
@@ -12,10 +10,9 @@ interface FallbackNoticeProps {
 export default function FallbackNotice({ soraPrompt, message }: FallbackNoticeProps) {
   const [copied, setCopied] = useState(false);
 
-  async function copyAndOpen() {
+  async function copyPrompt() {
     await navigator.clipboard.writeText(soraPrompt);
     setCopied(true);
-    window.open(SORA_URL, "_blank", "noopener,noreferrer");
     setTimeout(() => setCopied(false), 3000);
   }
 
@@ -27,9 +24,9 @@ export default function FallbackNotice({ soraPrompt, message }: FallbackNoticePr
       <div className="flex items-start gap-3">
         <span className="text-xl shrink-0">⚠️</span>
         <div>
-          <p className="text-amber-400 font-semibold text-sm">Sora 暂时不可用</p>
+          <p className="text-amber-400 font-semibold text-sm">视频生成暂时不可用</p>
           <p className="text-slate-400 text-xs mt-1">
-            {message ?? "视频生成服务暂时繁忙，请将脚本复制到外部工具使用。"}
+            {message ?? "当前视频 provider 暂时繁忙，你可以先复制脚本，稍后重试。"}
           </p>
         </div>
       </div>
@@ -43,7 +40,7 @@ export default function FallbackNotice({ soraPrompt, message }: FallbackNoticePr
       </div>
 
       <button
-        onClick={copyAndOpen}
+        onClick={copyPrompt}
         className="w-full py-3 rounded-xl font-semibold text-white transition-all flex items-center justify-center gap-2"
         style={{
           background: copied
@@ -51,8 +48,7 @@ export default function FallbackNotice({ soraPrompt, message }: FallbackNoticePr
             : "linear-gradient(135deg, #D97706, #7C3AED)",
         }}
       >
-        <span>{copied ? "已复制，正在跳转..." : "复制脚本并前往 sora.yeadon.top"}</span>
-        <span>→</span>
+        <span>{copied ? "脚本已复制" : "复制脚本"}</span>
       </button>
     </div>
   );

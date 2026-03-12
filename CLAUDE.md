@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This is a Claude Code **skill** for short video auto-generation. It orchestrates two APIs via `yunwu.ai`:
+This is a Claude Code **skill** for short video auto-generation. It orchestrates Gemini (`gemini-3.1-pro-preview`) for script generation and Plato Sora2 for video generation:
 - **Gemini** (`gemini-3-pro-preview`) — analyzes an input video (or expands a theme) and generates an English Sora prompt
-- **Sora** (`sora-2-all`) — generates video from the prompt (with optional image references)
+- **Plato Sora2** (`sora-2` by default) — generates video from the prompt
 
 The skill is invoked by Claude Code via `SKILL.md` and executed by running `scripts/generate.py`.
 
@@ -43,10 +43,12 @@ python3 scripts/generate.py --video demo.mp4 --images 0
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `YUNWU_API_KEY` | Yes | Sora video generation + Gemini via yunwu.ai |
-| `YUNWU_GEMINI_API_KEY` | No | Gemini calls; falls back to `YUNWU_API_KEY` |
+| `VIDEO_API_KEY` | Yes | Plato / BLTCY video generation |
+| `VIDEO_BASE_URL` | No | Defaults to `https://api.bltcy.ai` |
+| `VIDEO_MODEL` | No | Defaults to `sora-2` |
+| `GEMINI_API_KEY` | No | Gemini calls; falls back to `YUNWU_GEMINI_API_KEY` / `YUNWU_API_KEY` |
 | `TIKHUB_API_KEY` | When using `--url` | Resolve and download Douyin/TikTok videos |
-| `R2_ACCOUNT_ID`, `R2_BUCKET`, `S3_ID`, `S3_token`, `R2_PUBLIC_DOMAIN` | No | Cloudflare R2 for image hosting |
+| `UPLOAD_API_URL`, `UPLOAD_API_KEY`, `UPLOAD_PREFIX` | No | Cloudflare upload gateway for image hosting |
 
 ## Architecture
 

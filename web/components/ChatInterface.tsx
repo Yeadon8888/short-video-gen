@@ -6,6 +6,7 @@ import MessageBubble, { type Message } from "./MessageBubble";
 import ParamBar from "./ParamBar";
 import ImageManager from "./ImageManager";
 import type { ScriptResult } from "@/lib/gemini";
+import { getBrowserWorkspaceId, WORKSPACE_HEADER } from "@/lib/workspace";
 
 const WELCOME_MESSAGE: Message = {
   id: "welcome",
@@ -29,15 +30,14 @@ interface SSEEvent {
   sora_prompt?: string;
 }
 
-interface ChatInterfaceProps {
-  userName: string;
-}
-
-export default function ChatInterface({ userName }: ChatInterfaceProps) {
+export default function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [imageManagerOpen, setImageManagerOpen] = useState(false);
+  const [workspaceId, setWorkspaceId] = useState("");
+  const [imageCount, setImageCount] = useState(0);
+  const [gatewayEnabled, setGatewayEnabled] = useState(true);
   const [params, setParams] = useState<Params>({
     orientation: "portrait",
     duration: 15,
@@ -52,6 +52,16 @@ export default function ChatInterface({ userName }: ChatInterfaceProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  useEffect(() => {
+    setWorkspaceId(getBrowserWorkspaceId());
+  }, []);
+
+  useEffect(() => {
+    if (workspaceId) {
+      void refreshImageState(workspaceId);
+    }
+  }, [workspaceId]);
+
   function updateLastAiMessage(updater: (msg: Message) => Message) {
     setMessages((prev) => {
       const copy = [...prev];
@@ -63,12 +73,24 @@ export default function ChatInterface({ userName }: ChatInterfaceProps) {
     });
   }
 
+  async function refreshImageState(activeWorkspaceId: string) {
+    const res = await fetch("/api/images", {
+      headers: {
+        [WORKSPACE_HEADER]: activeWorkspaceId,
+      },
+    });
+    const data = await res.json();
+    setImageCount((data.urls ?? []).length);
+    setGatewayEnabled(data.gateway_enabled ?? false);
+  }
+
   async function sendRequest(body: {
     type: "video_b64" | "theme";
     input: string;
     mime_type?: string;
     modification?: string;
   }) {
+    if (!workspaceId) return;
     setIsLoading(true);
 
     // Add AI placeholder message
@@ -87,7 +109,10 @@ export default function ChatInterface({ userName }: ChatInterfaceProps) {
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          [WORKSPACE_HEADER]: workspaceId,
+        },
         body: JSON.stringify({ ...body, params }),
       });
 
@@ -225,7 +250,9 @@ export default function ChatInterface({ userName }: ChatInterfaceProps) {
           <span className="font-semibold gradient-text">VidClaw</span>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-slate-400">{userName}</span>
+          <span className="text-sm text-slate-400">
+            {workspaceId ? `工作区 ${workspaceId.slice(0, 8)}` : "初始化中..."}
+          </span>
           <button
             onClick={() => setImageManagerOpen(true)}
             className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg transition-all hover:text-white text-slate-400"
@@ -237,6 +264,32 @@ export default function ChatInterface({ userName }: ChatInterfaceProps) {
           </button>
         </div>
       </nav>
+
+      <div className="px-4 py-4 shrink-0" style={{ background: "#101018", borderBottom: "1px solid #1E1E2E" }}>
+        <div className="max-w-5xl mx-auto grid gap-3 md:grid-cols-3">
+          <div className="rounded-2xl p-4" style={{ background: "#161622", border: "1px solid #242438" }}>
+            <div className="text-xs text-slate-400 mb-2">Step 1</div>
+            <div className="text-white font-semibold">先上传参考图</div>
+            <div className="text-sm text-slate-400 mt-2">
+              当前 {imageCount} 张。柏拉图这条链路不再支持无参考图直出。
+            </div>
+          </div>
+          <div className="rounded-2xl p-4" style={{ background: "#161622", border: "1px solid #242438" }}>
+            <div className="text-xs text-slate-400 mb-2">Step 2</div>
+            <div className="text-white font-semibold">输入主题或上传原视频</div>
+            <div className="text-sm text-slate-400 mt-2">
+              Gemini 先拆脚本，再交给柏拉图 Sora2 生成。
+            </div>
+          </div>
+          <div className="rounded-2xl p-4" style={{ background: "#161622", border: "1px solid #242438" }}>
+            <div className="text-xs text-slate-400 mb-2">Step 3</div>
+            <div className="text-white font-semibold">等任务回片并下载</div>
+            <div className="text-sm text-slate-400 mt-2">
+              默认模型 `sora-2`，更稳。失败时会保留脚本方便重试。
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-6">
@@ -257,6 +310,24 @@ export default function ChatInterface({ userName }: ChatInterfaceProps) {
           {/* Param bar */}
           <ParamBar params={params} onChange={setParams} />
 
+          {!gatewayEnabled && (
+            <div
+              className="rounded-xl px-4 py-3 text-sm"
+              style={{ background: "#D9770611", border: "1px solid #D9770644", color: "#FBBF24" }}
+            >
+              上传网关还没配置好，先完成 Cloudflare Worker 和 `UPLOAD_API_URL` / `UPLOAD_API_KEY`。
+            </div>
+          )}
+
+          {gatewayEnabled && imageCount === 0 && (
+            <div
+              className="rounded-xl px-4 py-3 text-sm"
+              style={{ background: "#2563EB11", border: "1px solid #2563EB44", color: "#BFDBFE" }}
+            >
+              先点右上角“参考图”上传至少 1 张产品图或风格图，之后再发主题或视频。
+            </div>
+          )}
+
           {/* Text input + actions */}
           <div
             className="flex items-end gap-2 rounded-xl p-2"
@@ -265,7 +336,7 @@ export default function ChatInterface({ userName }: ChatInterfaceProps) {
             {/* Video upload button */}
             <button
               onClick={() => fileInputRef.current?.click()}
-              disabled={isLoading}
+              disabled={isLoading || !workspaceId || imageCount === 0}
               className="p-2 rounded-lg text-slate-400 hover:text-white transition-colors shrink-0 disabled:opacity-40"
               title="上传视频进行二创"
             >
@@ -284,16 +355,16 @@ export default function ChatInterface({ userName }: ChatInterfaceProps) {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="输入创意主题，或上传视频进行二创..."
+              placeholder={imageCount === 0 ? "先上传参考图，再输入创意主题或上传视频..." : "输入创意主题，或上传视频进行二创..."}
               rows={1}
-              disabled={isLoading}
+              disabled={isLoading || !workspaceId || imageCount === 0}
               className="flex-1 resize-none bg-transparent text-white placeholder-slate-500 text-sm outline-none py-2 max-h-32"
               style={{ lineHeight: "1.5" }}
             />
 
             <button
               onClick={handleSend}
-              disabled={!input.trim() || isLoading}
+              disabled={!input.trim() || isLoading || !workspaceId || imageCount === 0}
               className="shrink-0 px-4 py-2 rounded-lg font-medium text-sm text-white transition-all disabled:opacity-40"
               style={{
                 background: isLoading
@@ -311,6 +382,11 @@ export default function ChatInterface({ userName }: ChatInterfaceProps) {
       <ImageManager
         isOpen={imageManagerOpen}
         onClose={() => setImageManagerOpen(false)}
+        workspaceId={workspaceId}
+        onImagesChange={(count, enabled) => {
+          setImageCount(count);
+          setGatewayEnabled(enabled);
+        }}
       />
     </div>
   );

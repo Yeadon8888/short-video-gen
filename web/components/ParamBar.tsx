@@ -45,7 +45,8 @@ function Select<T extends string | number>({
 
 export default function ParamBar({ params, onChange }: ParamBarProps) {
   return (
-    <div className="flex items-center gap-2 flex-wrap">
+    <div className="flex items-center gap-3 flex-wrap">
+      <div className="text-xs uppercase tracking-[0.2em] text-slate-500">生成参数</div>
       <Select
         value={params.orientation}
         options={[
@@ -67,6 +68,7 @@ export default function ParamBar({ params, onChange }: ParamBarProps) {
         options={[1, 2, 3].map((n) => ({ value: n, label: `×${n}` }))}
         onChange={(v) => onChange({ ...params, count: v as number })}
       />
+      <span className="text-xs text-slate-500">默认模型: `sora-2`</span>
     </div>
   );
 }

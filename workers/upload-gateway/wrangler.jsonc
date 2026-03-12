@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vidclaw-upload-gateway",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-03-12",
+  "workers_dev": true,
+  "vars": {
+    "UPLOAD_PREFIX": "vidclaw-assets",
+    "MAX_UPLOAD_BYTES": "15728640"
+  },
+  "r2_buckets": [
+    {
+      "binding": "ASSETS_BUCKET",
+      "bucket_name": "vidclaw-assets"
+    }
+  ]
+}

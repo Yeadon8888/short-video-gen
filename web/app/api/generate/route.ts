@@ -1,8 +1,9 @@
 import { NextRequest } from "next/server";
-import { getSession } from "@/lib/auth";
 import { generateScript } from "@/lib/gemini";
-import { createPrimaryTasks, pollTasks, type SoraParams } from "@/lib/sora";
-import { getR2Config, listR2Objects } from "@/lib/r2";
+import { listAssets, isUploadGatewayEnabled } from "@/lib/storage/gateway";
+import { createTasks, pollTasks } from "@/lib/video/plato";
+import type { VideoParams } from "@/lib/video/types";
+import { getWorkspaceIdFromHeaders } from "@/lib/workspace";
 
 export const maxDuration = 300; // Vercel max
 
@@ -23,14 +24,9 @@ function sseData(obj: unknown): string {
 }
 
 export async function POST(req: NextRequest) {
-  // Auth check
-  const session = await getSession();
-  if (!session) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-
   const body = (await req.json()) as GenerateRequest;
   const { type, input, mime_type, modification, params } = body;
+  const workspaceId = getWorkspaceIdFromHeaders(req.headers);
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -43,16 +39,22 @@ export async function POST(req: NextRequest) {
       }
 
       try {
-        // ── Step 1: Get user's reference images from R2 ──
+        // ── Step 1: Get workspace reference images from upload gateway ──
         let imageUrls: string[] = [];
-        const r2Config = getR2Config();
-        if (r2Config) {
-          const prefix = `users/${session.code}/`;
-          const keys = await listR2Objects(r2Config, prefix);
-          imageUrls = keys.map((k) => `https://${r2Config.publicDomain}/${k}`);
-          if (imageUrls.length > 0) {
-            log(`发现 ${imageUrls.length} 张参考图片`);
-          }
+        if (isUploadGatewayEnabled()) {
+          const assets = await listAssets(workspaceId);
+          imageUrls = assets.map((asset) => asset.url);
+          log(`工作区 ${workspaceId.slice(0, 8)} 参考图 ${imageUrls.length} 张`);
+        }
+        if (imageUrls.length === 0) {
+          send({
+            type: "error",
+            code: "REFERENCE_IMAGE_REQUIRED",
+            message: "请先上传至少 1 张参考图片，再开始生成视频。",
+          });
+          send({ type: "done" });
+          controller.close();
+          return;
         }
 
         // ── Step 2: Gemini analysis ──
@@ -71,7 +73,7 @@ export async function POST(req: NextRequest) {
         send({ type: "script", data: scriptResult });
 
         // ── Step 3: Sora submission ──
-        const soraParams: SoraParams = {
+        const videoParams: VideoParams = {
           prompt: scriptResult.full_sora_prompt,
           imageUrls: imageUrls.slice(0, 1),
           orientation: params.orientation,
@@ -83,10 +85,9 @@ export async function POST(req: NextRequest) {
 
         let taskIds: string[];
         try {
-          taskIds = await createPrimaryTasks(soraParams);
+          taskIds = await createTasks(videoParams);
           log(`任务已提交: ${taskIds.join(", ")}`);
         } catch (e) {
-          // Sora unavailable — return prompt for manual use
           send({
             type: "error",
             code: "SORA_UNAVAILABLE",
@@ -101,9 +102,7 @@ export async function POST(req: NextRequest) {
         // ── Step 4: Poll ──
         send({ type: "stage", stage: "POLL", message: "等待视频生成..." });
 
-        const results = await pollTasks(taskIds, log, {
-          fallbackParams: soraParams,
-        });
+        const results = await pollTasks(taskIds, log);
 
         // Check if all failed
         const allFailed = [...results.values()].every((r) => !r.success);

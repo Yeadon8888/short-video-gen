@@ -1,6 +1,6 @@
 # 短视频自动生成 - Short Video Generator
 
-用 AI 把别人的短视频「临摹」成自己的。粘贴一条抖音/TikTok 分享链接，自动完成：下载原视频 → Gemini 分析内容 → Sora 重新生成视频 → 配好标题、文案、首评，整个流程无需手动干预。
+用 AI 把别人的短视频「临摹」成自己的。粘贴一条抖音/TikTok 分享链接，自动完成：下载原视频 → Gemini 分析内容 → 柏拉图 Sora2 重新生成视频 → 配好标题、文案、首评，整个流程无需手动干预。
 
 作为 [Claude Code](https://claude.ai/code) 的 skill 运行，`@` 一下即可触发。
 
@@ -24,10 +24,15 @@ cp .env.example .env
 
 | 变量 | 必填 | 说明 |
 |------|------|------|
-| `YUNWU_API_KEY` | 是 | 云雾 AI，用于 Sora 视频生成 |
-| `YUNWU_GEMINI_API_KEY` | 否 | 云雾 Gemini，不填则回退到 `YUNWU_API_KEY` |
+| `VIDEO_API_KEY` | 是 | 柏拉图 / BLTCY 视频生成接口 Key |
+| `VIDEO_BASE_URL` | 否 | 视频接口 Base URL，默认 `https://api.bltcy.ai` |
+| `VIDEO_MODEL` | 否 | 视频模型，默认 `sora-2` |
+| `GEMINI_API_KEY` | 否 | Gemini Key，当前默认模型为 `gemini-3.1-pro-preview`；不填则回退到 `YUNWU_GEMINI_API_KEY` / `YUNWU_API_KEY` |
+| `GEMINI_BASE_URL` | 否 | Gemini Base URL，默认 `https://yunwu.ai` |
 | `TIKHUB_API_KEY` | 使用 `--url` 时必填 | TikHub，用于解析抖音/TikTok 链接 |
-| `R2_ACCOUNT_ID` 等 | 否 | Cloudflare R2，用于产品图托管；不填则跳过图片上传 |
+| `UPLOAD_API_URL` | 否 | Cloudflare 上传网关地址 |
+| `UPLOAD_API_KEY` | 否 | Cloudflare 上传网关应用级密钥 |
+| `UPLOAD_PREFIX` | 否 | 上传前缀，默认 `vidclaw-assets` |
 
 ### 2. 运行
 
@@ -78,6 +83,6 @@ python3 "$SKILL_DIR/scripts/generate.py" --video demo.mp4 --images 0
 ## 注意事项
 
 - 视频文件建议 < 50 MB（Gemini inline_data 上限）
-- Sora 视频生成为异步任务，通常需等待 2–5 分钟
+- 柏拉图视频生成为异步任务，通常需等待 2–5 分钟
 - `--url` 收到混合文字时自动提取其中的 https 链接，无需手动清理
-- R2 图片存储为可选，不填相关环境变量则跳过产品图上传
+- 图片上传通过 Cloudflare Worker 网关完成，不再需要在 Web/CLI 中配置 R2 SigV4 凭证

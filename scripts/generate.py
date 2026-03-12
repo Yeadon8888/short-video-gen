@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-短视频自动生成 - Gemini (视频理解) + Sora-2-all (视频生成)
-通过 yunwu.ai API 代理调用
+短视频自动生成 - Gemini (视频理解) + 柏拉图 Sora2 (视频生成)
 """
 
 import sys
@@ -26,12 +25,13 @@ import ssl
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
-BASE_URL = "https://yunwu.ai"
-GEMINI_MODEL = "gemini-3-pro-preview"
-SORA_MODEL_WITH_IMAGES = "sora-2-all"   # 图片参考 → 视频
-SORA_MODEL_TEXT_ONLY = "sora-2-all"    # 纯文本 → 视频（images 传 []）
+GEMINI_BASE_URL = "https://yunwu.ai"
+VIDEO_BASE_URL = "https://api.bltcy.ai"
+GEMINI_MODEL = "gemini-3.1-pro-preview"
+DEFAULT_VIDEO_MODEL = "sora-2"
 TIKHUB_BASE_URL = "https://api.tikhub.io"
 TIKHUB_HYBRID_PATH = "/api/v1/hybrid/video_data"
 
@@ -318,21 +318,53 @@ def load_env():
             return
 
 
-def api_request(method, path, api_key, data=None, params=None):
+def get_gemini_base_url() -> str:
+    return os.environ.get("GEMINI_BASE_URL", "").strip() or GEMINI_BASE_URL
+
+
+def get_video_base_url() -> str:
+    return (
+        os.environ.get("VIDEO_BASE_URL", "").strip()
+        or os.environ.get("PLATO_BASE_URL", "").strip()
+        or VIDEO_BASE_URL
+    )
+
+
+def get_video_model() -> str:
+    return os.environ.get("VIDEO_MODEL", "").strip() or DEFAULT_VIDEO_MODEL
+
+
+def is_retryable_video_error(status_code, error_message: str) -> bool:
+    normalized = str(error_message).lower()
+    return (
+        str(status_code) == "429"
+        or "负载已饱和" in normalized
+        or "temporarily unavailable" in normalized
+        or "try again later" in normalized
+    )
+
+
+def should_bypass_proxy() -> bool:
+    raw = (os.environ.get("BYPASS_PROXY", "") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def api_request(method, path, api_key, data=None, params=None, base_url=None):
     """统一 API 请求封装（用 curl 绕过 Python 3.14 SSL 兼容性问题）"""
-    url = BASE_URL + path
+    url = (base_url or GEMINI_BASE_URL).rstrip("/") + path
     if params:
-        url += "?" + "&".join(f"{k}={v}" for k, v in params.items())
+        url += "?" + urllib.parse.urlencode(params)
 
     for attempt in range(3):
         cmd = [
             "curl", "-s", "-L", "--max-time", "300",
-            "--noproxy", "*",   # 绕过系统代理，避免代理 TLS 握手失败
             "-X", method,
             "-H", f"Authorization: Bearer {api_key}",
             "-H", "Content-Type: application/json",
             "-H", "Accept: application/json",
         ]
+        if should_bypass_proxy():
+            cmd[1:1] = ["--noproxy", "*"]
 
         # 写 body 到临时文件，避免命令行参数过长（base64 视频 payload 可达数 MB）
         tmp_body = None
@@ -378,17 +410,6 @@ def api_request(method, path, api_key, data=None, params=None):
                     pass
 
 
-def _hmac_sha256(key: bytes, msg: str) -> bytes:
-    return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
-
-
-def _s3_signing_key(secret_key: str, date_stamp: str, region: str, service: str) -> bytes:
-    k = _hmac_sha256(("AWS4" + secret_key).encode("utf-8"), date_stamp)
-    k = _hmac_sha256(k, region)
-    k = _hmac_sha256(k, service)
-    return _hmac_sha256(k, "aws4_request")
-
-
 def _file_md5(filepath: str) -> str:
     h = hashlib.md5()
     with open(filepath, "rb") as f:
@@ -415,7 +436,7 @@ def _save_cache(images_dir: str, cache: dict):
 
 
 def upload_image(filepath: str, images_dir: str = None) -> str | None:
-    """上传本地图片到 Cloudflare R2，有缓存则直接返回已有 URL"""
+    """上传本地图片到 Cloudflare 上传网关，有缓存则直接返回已有 URL"""
     # 检查缓存
     cache = _load_cache(images_dir) if images_dir else {}
     md5 = _file_md5(filepath)
@@ -423,87 +444,46 @@ def upload_image(filepath: str, images_dir: str = None) -> str | None:
         print(f"  命中缓存，跳过上传", end=" ", flush=True)
         return cache[md5]
 
-    account_id = os.environ.get("R2_ACCOUNT_ID", "")
-    bucket = os.environ.get("R2_BUCKET", "")
-    access_key = os.environ.get("S3_ID", "")
-    secret_key = os.environ.get("S3_token", "")
-    public_domain = os.environ.get("R2_PUBLIC_DOMAIN", "")
+    upload_api_url = os.environ.get("UPLOAD_API_URL", "").rstrip("/")
+    upload_api_key = os.environ.get("UPLOAD_API_KEY", "")
+    upload_prefix = os.environ.get("UPLOAD_PREFIX", "vidclaw-assets").strip("/").strip()
 
-    if not all([account_id, bucket, access_key, secret_key, public_domain]):
-        print("  ⚠️  R2 配置不完整，跳过图片上传", file=sys.stderr)
+    if not upload_api_url or not upload_api_key:
+        print("  ⚠️  上传网关未配置，跳过图片上传", file=sys.stderr)
         return None
-
-    with open(filepath, "rb") as f:
-        file_data = f.read()
 
     # 用 MD5 作为文件名前缀，保证同一文件 R2 上只有一份
     filename = f"{md5[:8]}_{os.path.basename(filepath)}"
     mime = mimetypes.guess_type(filepath)[0] or "image/jpeg"
-    payload_hash = hashlib.sha256(file_data).hexdigest()
-
-    now = datetime.datetime.now(datetime.timezone.utc)
-    amz_date = now.strftime("%Y%m%dT%H%M%SZ")
-    date_stamp = now.strftime("%Y%m%d")
-
-    host = f"{account_id}.r2.cloudflarestorage.com"
-    uri = f"/{bucket}/{filename}"
-    region = "auto"
-    service = "s3"
-
-    canonical_headers = (
-        f"content-type:{mime}\n"
-        f"host:{host}\n"
-        f"x-amz-content-sha256:{payload_hash}\n"
-        f"x-amz-date:{amz_date}\n"
-    )
-    signed_headers = "content-type;host;x-amz-content-sha256;x-amz-date"
-
-    canonical_request = "\n".join([
-        "PUT", uri, "",
-        canonical_headers, signed_headers, payload_hash,
-    ])
-
-    credential_scope = f"{date_stamp}/{region}/{service}/aws4_request"
-    string_to_sign = "\n".join([
-        "AWS4-HMAC-SHA256", amz_date, credential_scope,
-        hashlib.sha256(canonical_request.encode("utf-8")).hexdigest(),
-    ])
-
-    signing_key = _s3_signing_key(secret_key, date_stamp, region, service)
-    signature = hmac.new(signing_key, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
-
-    auth = (
-        f"AWS4-HMAC-SHA256 Credential={access_key}/{credential_scope}, "
-        f"SignedHeaders={signed_headers}, Signature={signature}"
-    )
+    object_key = f"{upload_prefix}/cli/{filename}" if upload_prefix else f"cli/{filename}"
+    upload_url = f"{upload_api_url}/upload?key={urllib.parse.quote(object_key)}"
 
     try:
         result = subprocess.run(
             [
-                "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-                "--noproxy", "*", "--max-time", "60",
-                "-X", "PUT",
+                "curl", "-s", "-L", "--max-time", "120",
+                "-X", "POST",
                 "-H", f"Content-Type: {mime}",
-                "-H", f"Host: {host}",
-                "-H", f"x-amz-content-sha256: {payload_hash}",
-                "-H", f"x-amz-date: {amz_date}",
-                "-H", f"Authorization: {auth}",
+                "-H", f"X-Upload-Key: {upload_api_key}",
                 "--data-binary", f"@{filepath}",
-                f"https://{host}{uri}",
+                upload_url,
             ],
             capture_output=True,
             timeout=70,
         )
-        http_code = result.stdout.decode("utf-8").strip()
-        if http_code in ("200", "204"):
-            url = f"https://{public_domain}/{filename}"
+        raw = result.stdout.decode("utf-8", errors="replace").strip()
+        if not raw:
+            raise Exception(result.stderr.decode("utf-8", errors="replace"))
+        payload = json.loads(raw)
+        url = payload.get("url")
+        if url:
             if images_dir:
                 cache[md5] = url
                 _save_cache(images_dir, cache)
             return url
-        raise Exception(f"HTTP {http_code}, stderr: {result.stderr.decode('utf-8', errors='replace')}")
+        raise Exception(raw[:200])
     except Exception as e:
-        print(f"  ⚠️  R2 上传失败 ({os.path.basename(filepath)}): {e}", file=sys.stderr)
+        print(f"  ⚠️  上传网关上传失败 ({os.path.basename(filepath)}): {e}", file=sys.stderr)
         return None
 
 
@@ -712,36 +692,47 @@ def generate_copy(sora_prompt, api_key, prompts=None):
 
 
 def create_video_tasks(api_key, prompt, image_urls, orientation, duration, count):
-    """创建 Sora 视频生成任务，返回 task_id 列表"""
-    # 有图片用 sora-2-all（image→video），无图片用 sora-2（text→video）
-    model = SORA_MODEL_WITH_IMAGES if image_urls else SORA_MODEL_TEXT_ONLY
+    """创建柏拉图 Sora2 视频生成任务，返回 task_id 列表"""
+    model = get_video_model()
+    aspect_ratio = "9:16" if orientation == "portrait" else "16:9"
     task_ids = []
     for i in range(count):
         print(f"🎥 创建视频任务 {i + 1}/{count}（模型: {model}）...")
         payload = {
-            "images": image_urls,   # 有图片传 URL 列表，无图片传 []
+            "images": image_urls,
             "model": model,
-            "orientation": orientation,
             "prompt": prompt,
-            "size": "large",
-            "duration": duration,
-            "watermark": False,
+            "aspect_ratio": aspect_ratio,
+            "duration": str(duration),
+            "watermark": True,
             "private": False,
         }
-        # 重试：上游负载饱和时最多等 3 次
+
         for attempt in range(1, 4):
-            result = api_request("POST", "/v1/video/create", api_key, data=payload)
-            task_id = result.get("id")
-            error_msg = result.get("error", "")
+            result = api_request(
+                "POST",
+                "/v2/videos/generations",
+                api_key,
+                data=payload,
+                base_url=get_video_base_url(),
+            )
+            task_id = result.get("task_id") or result.get("id")
+            error_msg = result.get("error") or result.get("message") or ""
+            status_code = result.get("status_code") or result.get("status") or ""
             if task_id:
                 break
-            if "负载已饱和" in str(error_msg) and attempt < 3:
-                print(f"  ⚠️  上游负载饱和，60 秒后重试（{attempt + 1}/3）...", file=sys.stderr)
-                time.sleep(60)
+            if attempt < 3 and is_retryable_video_error(status_code, error_msg):
+                wait_seconds = 15 * attempt
+                print(f"  ⚠️  视频上游繁忙，{wait_seconds} 秒后重试（{attempt}/3）: {error_msg}", file=sys.stderr)
+                time.sleep(wait_seconds)
+                continue
+            if attempt < 3:
+                print(f"  ⚠️  创建任务失败，3 秒后重试（{attempt}/3）: {error_msg}", file=sys.stderr)
+                time.sleep(3)
                 continue
             print(f"❌ 创建任务失败，API 响应: {result}", file=sys.stderr)
             sys.exit(1)
-        status = result.get("status", "unknown")
+        status = result.get("status", "NOT_START")
         task_ids.append(task_id)
         print(f"  ✅ 任务已提交: {task_id}（当前状态: {status}）")
 
@@ -750,7 +741,7 @@ def create_video_tasks(api_key, prompt, image_urls, orientation, duration, count
 
 def poll_tasks(api_key, task_ids, poll_interval=30, max_wait=1800):
     """轮询任务状态，直到全部完成或失败，最多等待 max_wait 秒（默认 30 分钟）"""
-    terminal_statuses = {"succeeded", "completed", "success", "failed", "error", "cancelled"}
+    terminal_statuses = {"SUCCESS", "FAILURE"}
     results = {}
     pending = set(task_ids)
     elapsed = 0
@@ -769,28 +760,28 @@ def poll_tasks(api_key, task_ids, poll_interval=30, max_wait=1800):
         for task_id in list(pending):
             result = api_request(
                 "GET",
-                "/v1/video/query",
+                f"/v2/videos/generations/{task_id}",
                 api_key,
-                params={"id": task_id},
+                base_url=get_video_base_url(),
             )
-            status = result.get("status", "unknown")
+            status = str(result.get("status", "UNKNOWN")).upper()
             print(f"  [POLL] {task_id[:24]}… status={status} elapsed={elapsed}s", flush=True)
 
             if status in terminal_statuses:
-                video_url = result.get("video_url")
-                enhanced = result.get("enhanced_prompt", "")
-                success = status not in {"failed", "error", "cancelled"}
+                data = result.get("data") if isinstance(result.get("data"), dict) else {}
+                video_url = data.get("output") if isinstance(data, dict) else None
+                success = status == "SUCCESS"
                 results[task_id] = {
                     "success": success,
                     "url": video_url,
-                    "enhanced_prompt": enhanced,
                     "status": status,
+                    "fail_reason": result.get("fail_reason", ""),
                 }
                 pending.remove(task_id)
                 if success:
                     print(f"  ✅ 完成！视频 URL: {video_url}", flush=True)
                 else:
-                    print(f"  ❌ 任务失败（状态: {status}）", flush=True)
+                    print(f"  ❌ 任务失败（状态: {status}）{result.get('fail_reason', '')}", flush=True)
 
     return results
 
@@ -856,16 +847,21 @@ def main():
 
         load_env()
         api_key = os.environ.get("YUNWU_API_KEY")
+        api_key = os.environ.get("VIDEO_API_KEY") or os.environ.get("PLATO_API_KEY") or api_key
         if not api_key:
             print(
-                "❌ 未找到 YUNWU_API_KEY\n"
+                "❌ 未找到 VIDEO_API_KEY / PLATO_API_KEY\n"
                 "请在 .env 文件添加：\n"
-                "  YUNWU_API_KEY=your_sora_key_here",
+                "  VIDEO_API_KEY=your_video_key_here",
                 file=sys.stderr,
             )
             sys.exit(1)
-        # YUNWU_GEMINI_API_KEY 用于 Gemini 调用，若未设置则回退到 YUNWU_API_KEY
-        gemini_api_key = os.environ.get("YUNWU_GEMINI_API_KEY") or api_key
+        gemini_api_key = (
+            os.environ.get("GEMINI_API_KEY")
+            or os.environ.get("YUNWU_GEMINI_API_KEY")
+            or os.environ.get("YUNWU_API_KEY")
+            or api_key
+        )
         tikhub_api_key = os.environ.get("TIKHUB_API_KEY") or os.environ.get("tikhub_api_key")
 
         mode = "二创（视频→Gemini→Sora）" if (args.video or args.url) else "生产（主题→Gemini→Sora）"
@@ -925,10 +921,13 @@ def main():
     # ── GENERATE ──────────────────────────────────────────────────────────────
     with _stage("GENERATE") as s:
         image_urls = get_image_urls(args.images, random_pick=args.random_image)
-        if image_urls:
-            print(f"  最终图片 URLs: {image_urls}\n")
-            # 将产品图注入到 prompt 末尾，确保 Sora 在视频中实际呈现产品
-            script = script + " The product shown in the reference image must appear clearly and prominently in the video."
+        if not image_urls:
+            print("❌ 柏拉图图生视频接口要求至少 1 张参考图片，请配置 --images 或上传网关。", file=sys.stderr)
+            sys.exit(1)
+
+        print(f"  最终图片 URLs: {image_urls}\n")
+        # 将产品图注入到 prompt 末尾，确保视频里真正出现该产品
+        script = script + " The product shown in the reference image must appear clearly and prominently in the video."
 
         task_ids = create_video_tasks(api_key, script, image_urls, args.orientation, args.duration, args.count)
         s["result"] = f"{len(task_ids)} tasks submitted"
@@ -947,10 +946,8 @@ def main():
         for task_id, res in results.items():
             if res["success"]:
                 print(f"✅ {res['url']}")
-                if res.get("enhanced_prompt"):
-                    print(f"   优化后的 Prompt: {res['enhanced_prompt']}")
             else:
-                print(f"❌ 任务 {task_id} 失败（状态: {res['status']}）")
+                print(f"❌ 任务 {task_id} 失败（状态: {res['status']}）{res.get('fail_reason', '')}")
         if copy_data:
             print(f"\n📋 视频文案")
             print(f"{'─'*60}")
