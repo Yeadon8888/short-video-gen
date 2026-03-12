@@ -19,3 +19,7 @@ scripts/lib/__pycache__/
 web/.next/
 web/node_modules/
 web/.env.local
+
+# Cloudflare worker local files
+workers/upload-gateway/node_modules/
+workers/upload-gateway/.upload_api_key
