@@ -20,9 +20,9 @@ interface UploadGatewayConfig {
 }
 
 function getConfig(): UploadGatewayConfig | null {
-  const baseUrl = process.env.UPLOAD_API_URL?.replace(/\/+$/, "") ?? "";
-  const apiKey = process.env.UPLOAD_API_KEY ?? "";
-  const prefix = (process.env.UPLOAD_PREFIX ?? "vidclaw-assets").replace(/^\/+|\/+$/g, "");
+  const baseUrl = process.env.UPLOAD_API_URL?.trim().replace(/\/+$/, "") ?? "";
+  const apiKey = process.env.UPLOAD_API_KEY?.trim() ?? "";
+  const prefix = (process.env.UPLOAD_PREFIX?.trim() ?? "vidclaw-assets").replace(/^\/+|\/+$/g, "");
 
   if (!baseUrl || !apiKey) {
     return null;
