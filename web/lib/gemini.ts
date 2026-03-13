@@ -6,6 +6,39 @@
 const GEMINI_MODEL = "gemini-3.1-pro-preview";
 const DEFAULT_BASE_URL = "https://yunwu.ai";
 
+/** Auto-appended to custom prompts that don't include the JSON schema */
+const JSON_OUTPUT_SUFFIX = `
+
+输出要求：
+必须且只能输出一个合法的 JSON 对象，格式如下：
+
+{
+  "creative_points": ["创意要点1", "创意要点2"],
+  "hook": "一句话爆点",
+  "plot_summary": "剧情梗概（2-3句话）",
+  "shots": [
+    {
+      "id": 1,
+      "scene_zh": "镜头1的中文场景描述",
+      "sora_prompt": "English Sora prompt for shot 1 only",
+      "duration_s": 3,
+      "camera": "close-up"
+    }
+  ],
+  "full_sora_prompt": "Complete English Sora prompt combining all shots for direct use",
+  "copy": {
+    "title": "视频标题（≤20字）",
+    "caption": "正文文案，50-100字，带#话题",
+    "first_comment": "首评，30-60字"
+  }
+}
+
+！！！极端重要！！！
+- camera 值只能是 close-up、wide、medium、overhead 之一
+- 只输出 JSON，不要任何解释文字、代码块标记（不要 \`\`\`json）
+- JSON 必须合法可解析
+`;
+
 export interface Shot {
   id: number;
   scene_zh: string;
@@ -120,6 +153,10 @@ export async function generateScript(params: {
     instruction = promptTemplate
       .replace(/\{\{THEME\}\}/g, theme ?? "")
       .replace(/\{\{MODIFICATION_PROMPT\}\}/g, modification ?? "");
+    // Auto-append JSON output schema if the custom prompt doesn't already include it
+    if (!instruction.includes('"full_sora_prompt"')) {
+      instruction += JSON_OUTPUT_SUFFIX;
+    }
   } else {
     instruction = buildDefaultPrompt(type, theme, modification);
   }

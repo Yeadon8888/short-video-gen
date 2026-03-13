@@ -123,7 +123,7 @@ export default function PromptEditor({ isOpen, onClose, workspaceId }: PromptEdi
           ) : (
             <>
               <p className="text-sm text-gray-400">
-                每个区块可以单独定制。留空则使用系统默认 Prompt。输出格式必须是结构化 JSON（与默认格式一致）。
+                每个区块可以单独定制。留空则使用系统默认 Prompt。只需写创意指令和风格要求，系统会自动追加 JSON 输出格式。
               </p>
               {SECTIONS.map((section) => (
                 <div key={section.key}>
