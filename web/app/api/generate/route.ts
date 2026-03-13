@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
         if (isUploadGatewayEnabled()) {
           const assets = await listAssets(workspaceId);
           imageUrls = assets
-            .filter((a) => !a.url.match(/\.(mp4|mov|webm)$/i))
+            .filter((a) => /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i.test(a.url))
             .map((a) => a.url);
           log(`工作区 ${workspaceId.slice(0, 8)} 参考图 ${imageUrls.length} 张`);
         }

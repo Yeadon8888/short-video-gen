@@ -662,7 +662,7 @@ def generate_copy(sora_prompt, api_key, prompts=None):
         instruction = _render(template, SORA_PROMPT=sora_prompt)
     else:
         instruction = (
-            "根据以下视频生成提示词，为短视频平台（抖音/小红书/快手）生成配套的中文文案：\n\n"
+            "根据以下视频生成提示词，为短视频平台生成配套的文案：\n\n"
             f"视频提示词：\n{sora_prompt}\n\n"
             "要求：\n"
             "1. 标题（title）：吸引眼球、简洁有力，不超过 20 字\n"
