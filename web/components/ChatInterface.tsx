@@ -228,6 +228,10 @@ export default function ChatInterface() {
   async function pollSoraTasks(taskIds: string[], soraPrompt?: string) {
     const POLL_INTERVAL = 15_000;
     const MAX_POLLS = 40; // 40 × 15s = 10 min
+    const STALE_LIMIT = 5; // give up after 5 consecutive polls with no progress change
+
+    let lastProgressKey = "";
+    let staleCount = 0;
 
     for (let poll = 0; poll < MAX_POLLS; poll++) {
       await new Promise((r) => setTimeout(r, POLL_INTERVAL));
@@ -239,7 +243,7 @@ export default function ChatInterface() {
         if (!res.ok) {
           updateLastAiMessage((msg) => ({
             ...msg,
-            logs: [...(msg.logs ?? []), `轮询失败: HTTP ${res.status}`],
+            logs: [...(msg.logs ?? []), `[轮询] #${poll + 1} 失败: HTTP ${res.status}`],
           }));
           continue;
         }
@@ -253,14 +257,18 @@ export default function ChatInterface() {
           failReason?: string;
         }>;
 
-        const progressSummary = results
-          .map((r) => `${r.taskId.slice(0, 8)}: ${r.status} ${r.progress}`)
-          .join(" | ");
-        updateLastAiMessage((msg) => ({
-          ...msg,
-          logs: [...(msg.logs ?? []), `轮询 #${poll + 1}: ${progressSummary}`],
-        }));
+        // Build progress summary log
+        const progressParts = results.map(
+          (r) => `${r.taskId.slice(0, 14)}... 状态=${r.status} 进度=${r.progress}`
+        );
+        for (const part of progressParts) {
+          updateLastAiMessage((msg) => ({
+            ...msg,
+            logs: [...(msg.logs ?? []), `[轮询] ${part}`],
+          }));
+        }
 
+        // Check if all tasks are done
         if (data.allDone) {
           const successUrls = results
             .filter((r) => r.status === "SUCCESS" && r.url)
@@ -292,21 +300,47 @@ export default function ChatInterface() {
           setIsLoading(false);
           return;
         }
+
+        // Stale progress detection: give up only when progress stops moving
+        const currentProgressKey = results
+          .map((r) => `${r.taskId}:${r.status}:${r.progress}`)
+          .join("|");
+
+        if (currentProgressKey === lastProgressKey) {
+          staleCount++;
+          if (staleCount >= STALE_LIMIT) {
+            updateLastAiMessage((msg) => ({
+              ...msg,
+              isLoading: false,
+              error: {
+                code: "POLL_STALE",
+                message: `视频生成进度停滞（连续 ${STALE_LIMIT} 次无变化），请检查任务后台或稍后重试。`,
+                sora_prompt: soraPrompt,
+              },
+            }));
+            pollingRef.current = false;
+            setIsLoading(false);
+            return;
+          }
+        } else {
+          staleCount = 0;
+          lastProgressKey = currentProgressKey;
+        }
       } catch (e) {
         updateLastAiMessage((msg) => ({
           ...msg,
-          logs: [...(msg.logs ?? []), `轮询异常: ${String(e).slice(0, 100)}`],
+          logs: [...(msg.logs ?? []), `[轮询] 异常: ${String(e).slice(0, 100)}`],
         }));
       }
     }
 
-    // Timeout
+    // Hard timeout after 10 minutes
     updateLastAiMessage((msg) => ({
       ...msg,
       isLoading: false,
       error: {
         code: "POLL_TIMEOUT",
-        message: "视频生成超时（已等待 10 分钟），请稍后重试。",
+        message: "视频生成超时（已等待 10 分钟），请检查任务后台。",
         sora_prompt: soraPrompt,
       },
     }));
