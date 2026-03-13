@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from "uuid";
 import MessageBubble, { type Message } from "./MessageBubble";
 import ParamBar from "./ParamBar";
 import ImageManager from "./ImageManager";
+import PromptEditor from "./PromptEditor";
 import type { ScriptResult } from "@/lib/gemini";
 import {
   WORKSPACE_HEADER,
@@ -46,6 +47,7 @@ export default function ChatInterface() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [imageManagerOpen, setImageManagerOpen] = useState(false);
+  const [promptEditorOpen, setPromptEditorOpen] = useState(false);
   const [workspaceId, setWorkspaceId] = useState("");
   const [imageCount, setImageCount] = useState(0);
   const [gatewayEnabled, setGatewayEnabled] = useState(true);
@@ -512,6 +514,15 @@ export default function ChatInterface() {
             <span>🖼</span>
             <span>参考图</span>
           </button>
+          <button
+            onClick={() => setPromptEditorOpen(true)}
+            className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg transition-all hover:text-white text-slate-400"
+            style={{ background: "#1E1E2E" }}
+            title="自定义 Prompt"
+          >
+            <span>✏️</span>
+            <span>Prompt</span>
+          </button>
         </div>
       </nav>
 
@@ -637,6 +648,13 @@ export default function ChatInterface() {
           setImageCount(count);
           setGatewayEnabled(enabled);
         }}
+      />
+
+      {/* Prompt editor */}
+      <PromptEditor
+        isOpen={promptEditorOpen}
+        onClose={() => setPromptEditorOpen(false)}
+        workspaceId={workspaceId}
       />
     </div>
   );

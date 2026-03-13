@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { generateScript } from "@/lib/gemini";
-import { listAssets, isUploadGatewayEnabled, fetchAssetBuffer } from "@/lib/storage/gateway";
+import { listAssets, isUploadGatewayEnabled, fetchAssetBuffer, loadWorkspacePrompts } from "@/lib/storage/gateway";
 import { createTasks } from "@/lib/video/plato";
 import type { VideoParams } from "@/lib/video/types";
 import { getWorkspaceIdFromHeaders } from "@/lib/workspace";
@@ -121,7 +121,21 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        // Load per-workspace custom prompts (if any)
+        const customPrompts = await loadWorkspacePrompts(workspaceId);
         const isVideoMode = type === "url" || type === "video_key";
+        let promptTemplate: string | undefined;
+        if (isVideoMode) {
+          promptTemplate = modification
+            ? customPrompts.video_remix_with_modification
+            : customPrompts.video_remix_base;
+        } else {
+          promptTemplate = customPrompts.theme_to_video;
+        }
+        if (promptTemplate) {
+          log("使用自定义 Prompt 模板");
+        }
+
         const scriptResult = await generateScript({
           type: isVideoMode ? "video" : "theme",
           videoBuffer: isVideoMode ? videoBuffer : undefined,
@@ -129,6 +143,7 @@ export async function POST(req: NextRequest) {
           theme: type === "theme" ? input : undefined,
           modification,
           imageBuffers,
+          promptTemplate,
         });
 
         log(`Gemini 生成完成，共 ${scriptResult.shots?.length ?? 0} 个镜头`);

@@ -245,7 +245,7 @@ export async function fetchAssetBuffer(url: string): Promise<{
     const tmpPath = join(tmpdir(), `fetch-asset-${Date.now()}`);
     try {
       const { stdout } = await execFileAsync("curl", [
-        "-sS", "-L", "--max-time", "120",
+        "-sS", "-L", "--fail", "--max-time", "120",
         "-o", tmpPath,
         "-w", "%{content_type}",
         url,
@@ -268,4 +268,53 @@ export async function fetchAssetBuffer(url: string): Promise<{
   const buffer = await res.arrayBuffer();
   const ct = res.headers.get("content-type") ?? "application/octet-stream";
   return { buffer, mimeType: ct.split(";")[0].trim() };
+}
+
+// ── Per-workspace custom prompts (stored as JSON on R2) ──
+
+export interface WorkspacePrompts {
+  video_remix_base?: string;
+  video_remix_with_modification?: string;
+  theme_to_video?: string;
+}
+
+const PROMPTS_FILENAME = "prompts.json";
+
+export async function loadWorkspacePrompts(workspaceId: string): Promise<WorkspacePrompts> {
+  const config = getConfig();
+  if (!config) return {};
+
+  const key = `${buildWorkspacePrefix(config, workspaceId)}/${PROMPTS_FILENAME}`;
+  const url = `${config.baseUrl}/files/${encodeKey(key)}`;
+
+  try {
+    const result = await fetchAssetBuffer(url);
+    const text = new TextDecoder().decode(result.buffer);
+    return JSON.parse(text) as WorkspacePrompts;
+  } catch {
+    // File doesn't exist or invalid JSON → return empty (use defaults)
+    return {};
+  }
+}
+
+export async function saveWorkspacePrompts(
+  workspaceId: string,
+  prompts: WorkspacePrompts
+): Promise<void> {
+  const config = getConfig();
+  if (!config) throw new Error("Upload gateway not configured");
+
+  const key = `${buildWorkspacePrefix(config, workspaceId)}/${PROMPTS_FILENAME}`;
+  const body = new TextEncoder().encode(JSON.stringify(prompts, null, 2));
+
+  await requestJson<{ success?: boolean }>({
+    method: "POST",
+    url: `${config.baseUrl}/upload?key=${encodeURIComponent(key)}`,
+    headers: {
+      "x-upload-key": config.apiKey,
+      "Content-Type": "application/json",
+    },
+    body: body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
+    timeoutSeconds: 30,
+  });
 }
