@@ -31,6 +31,7 @@ export async function PUT(req: NextRequest) {
     "video_remix_base",
     "video_remix_with_modification",
     "theme_to_video",
+    "copy_generation",
   ]);
   const cleaned: WorkspacePrompts = {};
   for (const [key, value] of Object.entries(body)) {

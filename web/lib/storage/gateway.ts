@@ -276,6 +276,7 @@ export interface WorkspacePrompts {
   video_remix_base?: string;
   video_remix_with_modification?: string;
   theme_to_video?: string;
+  copy_generation?: string;
 }
 
 const PROMPTS_FILENAME = "prompts.json";

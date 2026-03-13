@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { generateScript } from "@/lib/gemini";
+import { generateScript, generateCopy } from "@/lib/gemini";
 import { listAssets, isUploadGatewayEnabled, fetchAssetBuffer, loadWorkspacePrompts } from "@/lib/storage/gateway";
 import { createTasks } from "@/lib/video/plato";
 import type { VideoParams } from "@/lib/video/types";
@@ -147,6 +147,22 @@ export async function POST(req: NextRequest) {
         });
 
         log(`Gemini 生成完成，共 ${scriptResult.shots?.length ?? 0} 个镜头`);
+
+        // If custom copy_generation prompt exists, regenerate copy separately
+        if (customPrompts.copy_generation) {
+          try {
+            log("使用自定义文案 Prompt 重新生成文案...");
+            const copy = await generateCopy(
+              scriptResult.full_sora_prompt,
+              customPrompts.copy_generation
+            );
+            scriptResult.copy = copy;
+            log("自定义文案生成完成");
+          } catch (e) {
+            log(`自定义文案生成失败，使用脚本自带文案: ${String(e).slice(0, 100)}`);
+          }
+        }
+
         send({ type: "script", data: scriptResult });
 
         // ── Step 4: Sora submission ──

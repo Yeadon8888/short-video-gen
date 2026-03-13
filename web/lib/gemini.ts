@@ -241,3 +241,25 @@ ${modSection}
 - 只输出 JSON，不要任何额外文字、代码块标记`;
   }
 }
+
+/**
+ * Regenerate copy (title/caption/first_comment) using a custom copy prompt.
+ * The prompt template should contain {{SORA_PROMPT}} placeholder.
+ */
+export async function generateCopy(
+  soraPrompt: string,
+  copyPromptTemplate: string
+): Promise<{ title: string; caption: string; first_comment: string }> {
+  const instruction = copyPromptTemplate.replace(
+    /\{\{SORA_PROMPT\}\}/g,
+    soraPrompt
+  );
+
+  const payload = {
+    contents: [{ role: "user", parts: [{ text: instruction }] }],
+  };
+
+  const result = await geminiRequest(payload);
+  const raw = extractText(result);
+  return parseJson(raw) as { title: string; caption: string; first_comment: string };
+}

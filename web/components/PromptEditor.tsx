@@ -12,6 +12,7 @@ interface Prompts {
   video_remix_base?: string;
   video_remix_with_modification?: string;
   theme_to_video?: string;
+  copy_generation?: string;
 }
 
 const SECTIONS: {
@@ -38,6 +39,13 @@ const SECTIONS: {
     description:
       "用户上传视频/链接、带修改建议时使用。占位符 {{MODIFICATION_PROMPT}} 会被替换为修改内容。",
     placeholder: "留空使用默认 Prompt…",
+  },
+  {
+    key: "copy_generation",
+    label: "文案生成",
+    description:
+      "根据 Sora 脚本独立生成标题/文案/首评。占位符 {{SORA_PROMPT}} 会被替换为生成的 Sora 提示词。留空则使用脚本中自带的文案。",
+    placeholder: "留空使用脚本自带文案…",
   },
 ];
 
