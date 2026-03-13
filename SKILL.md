@@ -59,6 +59,7 @@ UPLOAD_PREFIX=vidclaw-assets
 SKILL_DIR="$HOME/.claude/skills/short-video-gen"
 cd "$SKILL_DIR"
 
+# 标准模式（阻塞等待结果）
 python3 scripts/generate.py \
   [--url "<分享文字或链接>"] \
   [--video <视频路径>] \
@@ -67,10 +68,34 @@ python3 scripts/generate.py \
   [--orientation portrait|landscape] \
   [--duration 10|15] \
   [--count 1-10] \
+  [--model veo3.1-fast|veo3.1-components|veo3.1-pro-4k|sora] \
   [--random-image]
+
+# OpenClaw 短会话模式（分步执行）
+python3 scripts/generate.py --prompt "主题" --submit   # 提交任务，~60s 返回
+python3 scripts/generate.py --check                     # 检查状态，~2s 返回
 ```
 
 > 视频路径如果是相对路径，需相对于 skill 目录。如果用户给的是绝对路径则直接用。
+
+### OpenClaw / 短会话环境专用
+
+视频生成耗时 2-5 分钟，OpenClaw 等平台无法维持长连接。解决方案：
+
+1. **提交阶段** (`--submit`)：执行 Gemini 分析 + 任务创建（~60s），状态保存到 `.task_state.json`，立即返回 task_ids
+2. **检查阶段** (`--check`)：瞬间查询所有任务的 status + progress（如 `IN_PROGRESS 67%`），任务完成后自动显示视频 URL 和文案
+
+Agent 工作流：
+```
+# 会话 1：提交
+python3 scripts/generate.py --prompt "猫咪在夜市" --submit
+# → 返回 task_ids，保存到 .task_state.json
+
+# 等 1-2 分钟后，会话 2：检查
+python3 scripts/generate.py --check
+# → 如果未完成：显示 status=IN_PROGRESS progress=67%
+# → 如果已完成：显示视频 URL + 文案，自动清理状态文件
+```
 
 ## 场景示例
 
@@ -166,6 +191,23 @@ python3 scripts/generate.py --check "veo3.1-fast:xxx,veo3.1-fast:yyy"
 | `TikHub 返回非 JSON` | Key 格式错误或无权限 | 重新检查 TIKHUB_API_KEY |
 | `视频文件不存在` | 路径错误 | 使用绝对路径，或确认相对路径正确 |
 | `Gemini API 超时` | 视频文件过大（>50MB） | 压缩视频后重试 |
+
+## 自定义提示词（prompts.md）
+
+编辑 skill 目录下的 `prompts.md` 可定制 Gemini 的行为，无需修改代码。文件使用 `## SECTION_NAME` 分节，`{{PLACEHOLDER}}` 在运行时自动替换。
+
+| 区块名 | 用途 | 占位符 |
+|--------|------|--------|
+| `VIDEO_REMIX_BASE` | 视频二创（无修改建议） | — |
+| `VIDEO_REMIX_WITH_MODIFICATION` | 视频二创（有修改建议） | `{{MODIFICATION_PROMPT}}` |
+| `THEME_TO_VIDEO` | 生产模式主题扩展 | `{{THEME}}` |
+| `COPY_GENERATION` | 生成标题/文案/首评 JSON | `{{SORA_PROMPT}}` |
+
+preset 模板：
+- `prompts.md.example` — 通用默认模板
+- `prompts_glumoo.md` — Glumoo 品牌专用（猫产品 + 东南亚 + Malaysian English + #glumoo 标签）
+
+切换品牌模板：`cp prompts_glumoo.md prompts.md`
 
 ## 注意事项
 
