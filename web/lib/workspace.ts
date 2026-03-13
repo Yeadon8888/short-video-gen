@@ -2,7 +2,7 @@ export const WORKSPACE_HEADER = "x-workspace-id";
 const INVITE_STORAGE_KEY = "vidclaw-invite-code";
 
 /** Valid invite codes — add new codes here to create isolated workspaces */
-const VALID_INVITE_CODES = new Set(["1214"]);
+const VALID_INVITE_CODES = new Set(["1213", "1214"]);
 
 export function normalizeWorkspaceId(value: string | null | undefined): string | null {
   const cleaned = (value ?? "").trim();
