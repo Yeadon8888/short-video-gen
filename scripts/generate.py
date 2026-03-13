@@ -31,7 +31,7 @@ import urllib.request
 GEMINI_BASE_URL = "https://yunwu.ai"
 VIDEO_BASE_URL = "https://api.bltcy.ai"
 GEMINI_MODEL = "gemini-3.1-pro-preview"
-DEFAULT_VIDEO_MODEL = "sora-2"
+DEFAULT_VIDEO_MODEL = "veo3.1-fast"
 TIKHUB_BASE_URL = "https://api.tikhub.io"
 TIKHUB_HYBRID_PATH = "/api/v1/hybrid/video_data"
 
@@ -691,9 +691,9 @@ def generate_copy(sora_prompt, api_key, prompts=None):
     return copy_data
 
 
-def create_video_tasks(api_key, prompt, image_urls, orientation, duration, count):
-    """创建柏拉图 Sora2 视频生成任务，返回 task_id 列表"""
-    model = get_video_model()
+def create_video_tasks(api_key, prompt, image_urls, orientation, duration, count, model=None):
+    """创建视频生成任务（支持 Sora / VEO 等模型），返回 task_id 列表"""
+    model = model or get_video_model()
     aspect_ratio = "9:16" if orientation == "portrait" else "16:9"
     task_ids = []
     for i in range(count):
@@ -786,6 +786,24 @@ def poll_tasks(api_key, task_ids, poll_interval=30, max_wait=1800):
     return results
 
 
+def _extract_sora_prompt(raw: str) -> str:
+    """If Gemini returned a JSON with full_sora_prompt, extract it; otherwise return raw text."""
+    text = raw.strip()
+    # Strip markdown code fences
+    if text.startswith("```"):
+        text = text.split("```", 2)[1]
+        if text.startswith("json"):
+            text = text[4:]
+        text = text.strip()
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, dict) and "full_sora_prompt" in obj:
+            return obj["full_sora_prompt"]
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return raw
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # 入口
 # ──────────────────────────────────────────────────────────────────────────────
@@ -831,6 +849,12 @@ def main():
     )
     parser.add_argument("--count", type=int, default=1, help="生成数量，默认 1，最多 10")
     parser.add_argument("--random-image", action="store_true", help="从图片文件夹随机选一张，默认用第一张")
+    parser.add_argument(
+        "--model",
+        metavar="NAME",
+        default=None,
+        help="视频生成模型，默认 veo3.1-fast。可选: veo3.1-fast / veo3.1-components / veo3.1-pro-4k / sora",
+    )
 
     args = parser.parse_args()
 
@@ -871,7 +895,9 @@ def main():
         print(f"  模式:     {mode}")
         print(f"  方向:     {args.orientation}")
         print(f"  时长:     {args.duration}s")
+        video_model = args.model or get_video_model()
         print(f"  数量:     {args.count}")
+        print(f"  模型:     {video_model}")
         if args.url:
             print(f"  链接:     {args.url}")
         if args.video:
@@ -911,9 +937,11 @@ def main():
     # ── ANALYZE ───────────────────────────────────────────────────────────────
     with _stage("ANALYZE") as s:
         if args.video:
-            script = analyze_video_with_gemini(args.video, gemini_api_key, args.prompt, prompts)
+            raw_script = analyze_video_with_gemini(args.video, gemini_api_key, args.prompt, prompts)
         else:
-            script = expand_theme_with_gemini(args.prompt, gemini_api_key, prompts)
+            raw_script = expand_theme_with_gemini(args.prompt, gemini_api_key, prompts)
+
+        script = _extract_sora_prompt(raw_script)
 
         copy_data = generate_copy(script, gemini_api_key, prompts)
         s["result"] = f"prompt={len(script)}chars, copy={'OK' if copy_data else 'failed'}"
@@ -929,7 +957,7 @@ def main():
         # 将产品图注入到 prompt 末尾，确保视频里真正出现该产品
         script = script + " The product shown in the reference image must appear clearly and prominently in the video."
 
-        task_ids = create_video_tasks(api_key, script, image_urls, args.orientation, args.duration, args.count)
+        task_ids = create_video_tasks(api_key, script, image_urls, args.orientation, args.duration, args.count, model=video_model)
         s["result"] = f"{len(task_ids)} tasks submitted"
 
     # ── POLL ──────────────────────────────────────────────────────────────────

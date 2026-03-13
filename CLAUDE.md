@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This is a Claude Code **skill** for short video auto-generation. It orchestrates Gemini (`gemini-3.1-pro-preview`) for script generation and Plato Sora2 for video generation:
-- **Gemini** (`gemini-3-pro-preview`) — analyzes an input video (or expands a theme) and generates an English Sora prompt
-- **Plato Sora2** (`sora-2` by default) — generates video from the prompt
+This is a Claude Code **skill** for short video auto-generation. It orchestrates Gemini (`gemini-3.1-pro-preview`) for script generation and VEO 3.1 / Sora for video generation:
+- **Gemini** (`gemini-3.1-pro-preview`) — analyzes an input video (or expands a theme) and generates an English video prompt
+- **VEO 3.1 Fast** (`veo3.1-fast` by default) — generates video from the prompt. Also supports `veo3.1-components`, `veo3.1-pro-4k`, and `sora`
 
 The skill is invoked by Claude Code via `SKILL.md` and executed by running `scripts/generate.py`.
 
@@ -45,7 +45,7 @@ python3 scripts/generate.py --video demo.mp4 --images 0
 |---|---|---|
 | `VIDEO_API_KEY` | Yes | Plato / BLTCY video generation |
 | `VIDEO_BASE_URL` | No | Defaults to `https://api.bltcy.ai` |
-| `VIDEO_MODEL` | No | Defaults to `sora-2` |
+| `VIDEO_MODEL` | No | Defaults to `veo3.1-fast`. Options: `veo3.1-fast`, `veo3.1-components`, `veo3.1-pro-4k`, `sora` |
 | `GEMINI_API_KEY` | No | Gemini calls; falls back to `YUNWU_GEMINI_API_KEY` / `YUNWU_API_KEY` |
 | `TIKHUB_API_KEY` | When using `--url` | Resolve and download Douyin/TikTok videos |
 | `UPLOAD_API_URL`, `UPLOAD_API_KEY`, `UPLOAD_PREFIX` | No | Cloudflare upload gateway for image hosting |
@@ -65,8 +65,8 @@ python3 scripts/generate.py --video demo.mp4 --images 0
 3. If `--images` (default: `$SKILL_DIR/image/`): upload new images to R2 (AWS Sig V4), cache MD5→URL in `image_cache.json`
 4. Call Gemini → get Sora prompt
 5. Call Gemini again → generate Chinese copy (title + caption + first_comment JSON)
-6. POST to `/v1/video/create` on yunwu.ai (one task per `--count`)
-7. Poll `/v1/video/query` every 30 seconds until terminal status
+6. POST to `/v2/videos/generations` on api.bltcy.ai (one task per `--count`)
+7. Poll `/v2/videos/generations/{task_id}` every 30 seconds until terminal status
 
 **API retry logic:** 3 attempts — 60s delay on upstream saturation (HTTP 500 + "负载已饱和"), 5s delay on timeout/network errors.
 
