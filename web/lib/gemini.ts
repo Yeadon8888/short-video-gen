@@ -144,8 +144,13 @@ export async function generateScript(params: {
   imageUrls?: string[];
   imageBuffers?: { buffer: ArrayBuffer; mimeType: string }[];
   promptTemplate?: string;
+  platform?: "douyin" | "tiktok";
 }): Promise<ScriptResult> {
-  const { type, videoB64, videoBuffer, mimeType, theme, modification, imageBuffers, promptTemplate } = params;
+  const { type, videoB64, videoBuffer, mimeType, theme, modification, imageBuffers, promptTemplate, platform } = params;
+
+  const platformInstruction = platform === "tiktok"
+    ? "\n\n**IMPORTANT: This video is for TikTok (international audience). All copy (title, caption, first_comment) MUST be written in English. Sora prompts are always in English.**"
+    : "";
 
   // Build instruction
   let instruction: string;
@@ -157,8 +162,9 @@ export async function generateScript(params: {
     if (!instruction.includes('"full_sora_prompt"')) {
       instruction += JSON_OUTPUT_SUFFIX;
     }
+    instruction += platformInstruction;
   } else {
-    instruction = buildDefaultPrompt(type, theme, modification);
+    instruction = buildDefaultPrompt(type, theme, modification) + platformInstruction;
   }
 
   // Build content parts
@@ -285,12 +291,16 @@ ${modSection}
  */
 export async function generateCopy(
   soraPrompt: string,
-  copyPromptTemplate: string
+  copyPromptTemplate: string,
+  platform?: "douyin" | "tiktok"
 ): Promise<{ title: string; caption: string; first_comment: string }> {
-  const instruction = copyPromptTemplate.replace(
+  let instruction = copyPromptTemplate.replace(
     /\{\{SORA_PROMPT\}\}/g,
     soraPrompt
   );
+  if (platform === "tiktok") {
+    instruction += "\n\n**IMPORTANT: All output (title, caption, first_comment) MUST be in English for TikTok international audience.**";
+  }
 
   const payload = {
     contents: [{ role: "user", parts: [{ text: instruction }] }],

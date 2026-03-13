@@ -4,6 +4,7 @@ interface Params {
   orientation: "portrait" | "landscape";
   duration: 10 | 15;
   count: number;
+  platform: "douyin" | "tiktok";
 }
 
 interface ParamBarProps {
@@ -67,6 +68,14 @@ export default function ParamBar({ params, onChange }: ParamBarProps) {
         value={params.count}
         options={[1, 2, 3, 5, 10].map((n) => ({ value: n, label: `×${n}` }))}
         onChange={(v) => onChange({ ...params, count: v as number })}
+      />
+      <Select
+        value={params.platform}
+        options={[
+          { value: "douyin", label: "抖音" },
+          { value: "tiktok", label: "TikTok" },
+        ]}
+        onChange={(v) => onChange({ ...params, platform: v as "douyin" | "tiktok" })}
       />
       <span className="text-xs text-slate-500">默认模型: `sora-2`</span>
     </div>

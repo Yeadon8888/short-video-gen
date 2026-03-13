@@ -22,6 +22,7 @@ interface GenerateRequest {
     orientation: "portrait" | "landscape";
     duration: 10 | 15;
     count: number;
+    platform?: "douyin" | "tiktok";
   };
 }
 
@@ -144,6 +145,7 @@ export async function POST(req: NextRequest) {
           modification,
           imageBuffers,
           promptTemplate,
+          platform: params.platform,
         });
 
         log(`Gemini 生成完成，共 ${scriptResult.shots?.length ?? 0} 个镜头`);
@@ -154,7 +156,8 @@ export async function POST(req: NextRequest) {
             log("使用自定义文案 Prompt 重新生成文案...");
             const copy = await generateCopy(
               scriptResult.full_sora_prompt,
-              customPrompts.copy_generation
+              customPrompts.copy_generation,
+              params.platform
             );
             scriptResult.copy = copy;
             log("自定义文案生成完成");

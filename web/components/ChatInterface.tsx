@@ -25,6 +25,7 @@ interface Params {
   orientation: "portrait" | "landscape";
   duration: 10 | 15;
   count: number;
+  platform: "douyin" | "tiktok";
 }
 
 interface SSEEvent {
@@ -58,6 +59,7 @@ export default function ChatInterface() {
     orientation: "portrait",
     duration: 15,
     count: 1,
+    platform: "douyin",
   });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
