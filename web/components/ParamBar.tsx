@@ -5,6 +5,7 @@ interface Params {
   duration: 10 | 15;
   count: number;
   platform: "douyin" | "tiktok";
+  model: string;
 }
 
 interface ParamBarProps {
@@ -77,7 +78,16 @@ export default function ParamBar({ params, onChange }: ParamBarProps) {
         ]}
         onChange={(v) => onChange({ ...params, platform: v as "douyin" | "tiktok" })}
       />
-      <span className="text-xs text-slate-500">默认模型: `sora-2`</span>
+      <Select
+        value={params.model}
+        options={[
+          { value: "veo3.1-fast", label: "VEO 3.1 Fast" },
+          { value: "veo3.1", label: "VEO 3.1" },
+          { value: "veo3.1-pro", label: "VEO 3.1 Pro" },
+          { value: "sora-2", label: "Sora 2" },
+        ]}
+        onChange={(v) => onChange({ ...params, model: v })}
+      />
     </div>
   );
 }

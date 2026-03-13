@@ -26,6 +26,7 @@ interface Params {
   duration: 10 | 15;
   count: number;
   platform: "douyin" | "tiktok";
+  model: string;
 }
 
 interface SSEEvent {
@@ -60,6 +61,7 @@ export default function ChatInterface() {
     duration: 15,
     count: 1,
     platform: "douyin",
+    model: "veo3.1-fast",
   });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);

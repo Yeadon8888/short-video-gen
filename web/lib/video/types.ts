@@ -4,6 +4,7 @@ export interface VideoParams {
   orientation: "portrait" | "landscape";
   duration: 10 | 15;
   count: number;
+  model?: string;
 }
 
 export interface TaskResult {

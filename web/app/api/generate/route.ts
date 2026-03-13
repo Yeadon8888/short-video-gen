@@ -23,6 +23,7 @@ interface GenerateRequest {
     duration: 10 | 15;
     count: number;
     platform?: "douyin" | "tiktok";
+    model?: string;
   };
 }
 
@@ -179,6 +180,7 @@ export async function POST(req: NextRequest) {
           orientation: params.orientation,
           duration: params.duration,
           count: Math.min(Math.max(params.count, 1), 10),
+          model: params.model,
         };
 
         send({ type: "stage", stage: "GENERATE", message: "提交 Sora 任务..." });

@@ -114,7 +114,7 @@ export async function createTasks(params: VideoParams): Promise<string[]> {
   const taskIds: string[] = [];
   const payload = {
     prompt: params.prompt,
-    model: getModel(),
+    model: params.model || getModel(),
     images: params.imageUrls ?? [],
     aspect_ratio: toAspectRatio(params.orientation),
     duration: String(params.duration),
