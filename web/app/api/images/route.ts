@@ -14,7 +14,9 @@ export async function GET(req: NextRequest) {
 
   try {
     const workspaceId = getWorkspaceIdFromHeaders(req.headers);
-    const urls = await listAssets(workspaceId);
+    const all = await listAssets(workspaceId);
+    // Only return image files — exclude prompts.json and other non-image assets
+    const urls = all.filter((a) => /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i.test(a.url));
     return NextResponse.json({ urls, gateway_enabled: true });
   } catch (e) {
     return NextResponse.json(
