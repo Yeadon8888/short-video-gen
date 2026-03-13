@@ -82,9 +82,9 @@ export default function ParamBar({ params, onChange }: ParamBarProps) {
         value={params.model}
         options={[
           { value: "veo3.1-fast", label: "VEO 3.1 Fast" },
-          { value: "veo3.1", label: "VEO 3.1" },
-          { value: "veo3.1-pro", label: "VEO 3.1 Pro" },
-          { value: "sora-2", label: "Sora 2" },
+          { value: "veo3.1-components", label: "VEO 3.1 Components" },
+          { value: "veo3.1-pro-4k", label: "VEO 3.1 Pro 4K" },
+          { value: "sora", label: "Sora" },
         ]}
         onChange={(v) => onChange({ ...params, model: v })}
       />
