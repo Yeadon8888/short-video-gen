@@ -34,6 +34,7 @@ interface SSEEvent {
   urls?: string[];
   code?: string;
   sora_prompt?: string;
+  taskIds?: string[];
 }
 
 /** Detect Douyin / TikTok share URLs */
@@ -60,6 +61,7 @@ export default function ChatInterface() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pollingRef = useRef(false);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -179,6 +181,19 @@ export default function ChatInterface() {
               ...msg,
               videos: { urls: event.urls ?? [] },
             }));
+          } else if (event.type === "tasks") {
+            // Server submitted Sora tasks; start client-side polling
+            const taskIds = event.taskIds ?? [];
+            const soraPrompt = event.sora_prompt;
+            if (taskIds.length > 0) {
+              pollingRef.current = true;
+              updateLastAiMessage((msg) => ({
+                ...msg,
+                stage: "POLL",
+                logs: [...(msg.logs ?? []), `任务已提交: ${taskIds.join(", ").slice(0, 60)}`],
+              }));
+              pollSoraTasks(taskIds, soraPrompt);
+            }
           } else if (event.type === "error") {
             updateLastAiMessage((msg) => ({
               ...msg,
@@ -189,7 +204,10 @@ export default function ChatInterface() {
               },
             }));
           } else if (event.type === "done") {
-            updateLastAiMessage((msg) => ({ ...msg, isLoading: false }));
+            // If polling is active, keep loading state for client-side polling
+            if (!pollingRef.current) {
+              updateLastAiMessage((msg) => ({ ...msg, isLoading: false }));
+            }
           }
         }
       }
@@ -199,9 +217,101 @@ export default function ChatInterface() {
         isLoading: false,
         error: { code: "NETWORK", message: String(e) },
       }));
+      pollingRef.current = false;
     } finally {
-      setIsLoading(false);
+      if (!pollingRef.current) {
+        setIsLoading(false);
+      }
     }
+  }
+
+  async function pollSoraTasks(taskIds: string[], soraPrompt?: string) {
+    const POLL_INTERVAL = 15_000;
+    const MAX_POLLS = 40; // 40 × 15s = 10 min
+
+    for (let poll = 0; poll < MAX_POLLS; poll++) {
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+
+      try {
+        const res = await fetch(
+          `/api/generate/status?taskIds=${encodeURIComponent(taskIds.join(","))}`
+        );
+        if (!res.ok) {
+          updateLastAiMessage((msg) => ({
+            ...msg,
+            logs: [...(msg.logs ?? []), `轮询失败: HTTP ${res.status}`],
+          }));
+          continue;
+        }
+
+        const data = await res.json();
+        const results = data.results as Array<{
+          taskId: string;
+          status: string;
+          progress: string;
+          url?: string;
+          failReason?: string;
+        }>;
+
+        const progressSummary = results
+          .map((r) => `${r.taskId.slice(0, 8)}: ${r.status} ${r.progress}`)
+          .join(" | ");
+        updateLastAiMessage((msg) => ({
+          ...msg,
+          logs: [...(msg.logs ?? []), `轮询 #${poll + 1}: ${progressSummary}`],
+        }));
+
+        if (data.allDone) {
+          const successUrls = results
+            .filter((r) => r.status === "SUCCESS" && r.url)
+            .map((r) => r.url!);
+
+          if (successUrls.length > 0) {
+            updateLastAiMessage((msg) => ({
+              ...msg,
+              isLoading: false,
+              videos: { urls: successUrls },
+            }));
+          } else {
+            const failReasons = results
+              .filter((r) => r.status === "FAILED")
+              .map((r) => r.failReason ?? "未知原因")
+              .join("; ");
+            updateLastAiMessage((msg) => ({
+              ...msg,
+              isLoading: false,
+              error: {
+                code: "SORA_FAILED",
+                message: `视频生成失败: ${failReasons}`,
+                sora_prompt: soraPrompt,
+              },
+            }));
+          }
+
+          pollingRef.current = false;
+          setIsLoading(false);
+          return;
+        }
+      } catch (e) {
+        updateLastAiMessage((msg) => ({
+          ...msg,
+          logs: [...(msg.logs ?? []), `轮询异常: ${String(e).slice(0, 100)}`],
+        }));
+      }
+    }
+
+    // Timeout
+    updateLastAiMessage((msg) => ({
+      ...msg,
+      isLoading: false,
+      error: {
+        code: "POLL_TIMEOUT",
+        message: "视频生成超时（已等待 10 分钟），请稍后重试。",
+        sora_prompt: soraPrompt,
+      },
+    }));
+    pollingRef.current = false;
+    setIsLoading(false);
   }
 
   async function handleSend() {

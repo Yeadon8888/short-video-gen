@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { generateScript } from "@/lib/gemini";
 import { listAssets, isUploadGatewayEnabled, fetchAssetBuffer } from "@/lib/storage/gateway";
-import { createTasks, pollTasks } from "@/lib/video/plato";
+import { createTasks } from "@/lib/video/plato";
 import type { VideoParams } from "@/lib/video/types";
 import { getWorkspaceIdFromHeaders } from "@/lib/workspace";
 import {
@@ -110,6 +110,17 @@ export async function POST(req: NextRequest) {
         // ── Step 3: Gemini analysis ──
         send({ type: "stage", stage: "ANALYZE", message: "Gemini 分析中，请稍候..." });
 
+        // Fetch reference images as buffers for Gemini inline_data
+        const imageBuffers: { buffer: ArrayBuffer; mimeType: string }[] = [];
+        for (const url of imageUrls.slice(0, 1)) {
+          try {
+            const fetched = await fetchAssetBuffer(url);
+            imageBuffers.push({ buffer: fetched.buffer, mimeType: fetched.mimeType });
+          } catch (e) {
+            log(`获取参考图片失败: ${String(e).slice(0, 100)}`);
+          }
+        }
+
         const isVideoMode = type === "url" || type === "video_key";
         const scriptResult = await generateScript({
           type: isVideoMode ? "video" : "theme",
@@ -117,15 +128,19 @@ export async function POST(req: NextRequest) {
           mimeType: isVideoMode ? videoMime : undefined,
           theme: type === "theme" ? input : undefined,
           modification,
-          imageUrls: imageUrls.slice(0, 1),
+          imageBuffers,
         });
 
         log(`Gemini 生成完成，共 ${scriptResult.shots?.length ?? 0} 个镜头`);
         send({ type: "script", data: scriptResult });
 
         // ── Step 4: Sora submission ──
+        const soraPrompt =
+          scriptResult.full_sora_prompt +
+          " The product shown in the reference image must appear clearly and prominently in the video.";
+
         const videoParams: VideoParams = {
-          prompt: scriptResult.full_sora_prompt,
+          prompt: soraPrompt,
           imageUrls: imageUrls.slice(0, 1),
           orientation: params.orientation,
           duration: params.duration,
@@ -150,29 +165,12 @@ export async function POST(req: NextRequest) {
           return;
         }
 
-        // ── Step 5: Poll (fast timeout: max 3 minutes) ──
-        send({ type: "stage", stage: "POLL", message: "等待视频生成..." });
-
-        const results = await pollTasks(taskIds, log, {
-          pollIntervalMs: 15_000,
-          maxWaitMs: 180_000, // 3 minutes
+        // ── Step 5: Return task IDs (client polls /api/generate/status) ──
+        send({
+          type: "tasks",
+          taskIds,
+          sora_prompt: soraPrompt,
         });
-
-        const allFailed = [...results.values()].every((r) => !r.success);
-        if (allFailed) {
-          send({
-            type: "error",
-            code: "SORA_UNAVAILABLE",
-            message:
-              "所有任务均失败或超时，可以复制脚本到其他视频生成平台重试。",
-            sora_prompt: scriptResult.full_sora_prompt,
-          });
-        } else {
-          const videos = [...results.values()]
-            .filter((r) => r.success)
-            .map((r) => r.url);
-          send({ type: "videos", urls: videos });
-        }
 
         send({ type: "done" });
         controller.close();

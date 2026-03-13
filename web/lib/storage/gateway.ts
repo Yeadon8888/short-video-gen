@@ -241,6 +241,23 @@ export async function fetchAssetBuffer(url: string): Promise<{
   buffer: ArrayBuffer;
   mimeType: string;
 }> {
+  if (shouldPreferCurl()) {
+    const tmpPath = join(tmpdir(), `fetch-asset-${Date.now()}`);
+    try {
+      const { stdout } = await execFileAsync("curl", [
+        "-sS", "-L", "--max-time", "120",
+        "-o", tmpPath,
+        "-w", "%{content_type}",
+        url,
+      ], { maxBuffer: 200 * 1024 * 1024 });
+      const ct = (stdout.trim() || "application/octet-stream").split(";")[0].trim();
+      const data = await fs.readFile(tmpPath);
+      return { buffer: data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength), mimeType: ct };
+    } finally {
+      await fs.unlink(tmpPath).catch(() => {});
+    }
+  }
+
   const res = await fetch(url, {
     signal: AbortSignal.timeout(120_000),
     cache: "no-store",

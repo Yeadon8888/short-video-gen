@@ -139,6 +139,31 @@ async function queryTask(taskId: string): Promise<Record<string, unknown>> {
   return apiRequest("GET", `${STATUS_ENDPOINT}/${taskId}`);
 }
 
+export async function queryTaskStatus(taskId: string): Promise<{
+  taskId: string;
+  status: string;
+  progress: string;
+  url?: string;
+  failReason?: string;
+}> {
+  const result = await queryTask(taskId);
+  const status = normalizeStatus(result.status);
+  const progress = String(result.progress || "0%");
+
+  if (SUCCESS_STATES.has(status)) {
+    return { taskId, status: "SUCCESS", progress: "100%", url: extractVideoUrl(result) };
+  }
+  if (FAILURE_STATES.has(status)) {
+    return {
+      taskId,
+      status: "FAILED",
+      progress,
+      failReason: String(result.fail_reason || result.message || "Video task failed"),
+    };
+  }
+  return { taskId, status, progress };
+}
+
 function normalizeStatus(value: unknown): string {
   return String(value || "UNKNOWN").toUpperCase();
 }

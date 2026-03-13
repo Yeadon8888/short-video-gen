@@ -109,9 +109,10 @@ export async function generateScript(params: {
   theme?: string;
   modification?: string;
   imageUrls?: string[];
+  imageBuffers?: { buffer: ArrayBuffer; mimeType: string }[];
   promptTemplate?: string;
 }): Promise<ScriptResult> {
-  const { type, videoB64, videoBuffer, mimeType, theme, modification, imageUrls, promptTemplate } = params;
+  const { type, videoB64, videoBuffer, mimeType, theme, modification, imageBuffers, promptTemplate } = params;
 
   // Build instruction
   let instruction: string;
@@ -126,11 +127,12 @@ export async function generateScript(params: {
   // Build content parts
   const parts: unknown[] = [];
 
-  // Add product/reference images first if provided
-  if (imageUrls && imageUrls.length > 0) {
+  // Add reference images as inline_data (native Gemini format)
+  if (imageBuffers && imageBuffers.length > 0) {
     parts.push({ text: "参考图片（产品图/风格参考）：" });
-    for (const url of imageUrls) {
-      parts.push({ image_url: { url } });
+    for (const img of imageBuffers) {
+      const b64 = Buffer.from(img.buffer).toString("base64");
+      parts.push({ inline_data: { mime_type: img.mimeType, data: b64 } });
     }
   }
 
