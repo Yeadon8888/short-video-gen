@@ -1,16 +1,22 @@
 import { NextRequest } from "next/server";
 import { generateScript } from "@/lib/gemini";
-import { listAssets, isUploadGatewayEnabled } from "@/lib/storage/gateway";
+import { listAssets, isUploadGatewayEnabled, fetchAssetBuffer } from "@/lib/storage/gateway";
 import { createTasks, pollTasks } from "@/lib/video/plato";
 import type { VideoParams } from "@/lib/video/types";
 import { getWorkspaceIdFromHeaders } from "@/lib/workspace";
+import {
+  isTikHubEnabled,
+  looksLikeVideoUrl,
+  extractUrl,
+  downloadVideoFromUrl,
+} from "@/lib/tikhub";
 
 export const maxDuration = 300; // Vercel max
 
 interface GenerateRequest {
-  type: "video_b64" | "theme";
-  input: string; // base64 video or theme text
-  mime_type?: string;
+  /** "theme" = 主题模式, "video_key" = 已上传视频 key, "url" = 抖音/TikTok 链接 */
+  type: "theme" | "video_key" | "url";
+  input: string;
   modification?: string;
   params: {
     orientation: "portrait" | "landscape";
@@ -25,7 +31,7 @@ function sseData(obj: unknown): string {
 
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as GenerateRequest;
-  const { type, input, mime_type, modification, params } = body;
+  const { type, input, modification, params } = body;
   const workspaceId = getWorkspaceIdFromHeaders(req.headers);
 
   const encoder = new TextEncoder();
@@ -43,7 +49,9 @@ export async function POST(req: NextRequest) {
         let imageUrls: string[] = [];
         if (isUploadGatewayEnabled()) {
           const assets = await listAssets(workspaceId);
-          imageUrls = assets.map((asset) => asset.url);
+          imageUrls = assets
+            .filter((a) => !a.url.match(/\.(mp4|mov|webm)$/i))
+            .map((a) => a.url);
           log(`工作区 ${workspaceId.slice(0, 8)} 参考图 ${imageUrls.length} 张`);
         }
         if (imageUrls.length === 0) {
@@ -57,22 +65,65 @@ export async function POST(req: NextRequest) {
           return;
         }
 
-        // ── Step 2: Gemini analysis ──
+        // ── Step 2: Resolve video source (if applicable) ──
+        let videoBuffer: ArrayBuffer | undefined;
+        let videoMime: string | undefined;
+
+        if (type === "url") {
+          // URL mode: TikHub download
+          send({ type: "stage", stage: "DOWNLOAD", message: "正在下载视频..." });
+          if (!isTikHubEnabled()) {
+            send({
+              type: "error",
+              code: "TIKHUB_NOT_CONFIGURED",
+              message: "TIKHUB_API_KEY 未配置，无法解析视频链接。",
+            });
+            send({ type: "done" });
+            controller.close();
+            return;
+          }
+          const url = extractUrl(input);
+          if (!url) {
+            send({
+              type: "error",
+              code: "INVALID_URL",
+              message: "未能从输入中提取有效的抖音/TikTok 链接。",
+            });
+            send({ type: "done" });
+            controller.close();
+            return;
+          }
+          const dl = await downloadVideoFromUrl(url, log);
+          videoBuffer = dl.buffer;
+          videoMime = dl.mimeType;
+          log(`视频下载完成 (${dl.sizeMB.toFixed(1)} MB)`);
+        } else if (type === "video_key") {
+          // Video key mode: fetch from R2
+          send({ type: "stage", stage: "DOWNLOAD", message: "正在获取视频..." });
+          const fetched = await fetchAssetBuffer(input);
+          videoBuffer = fetched.buffer;
+          videoMime = fetched.mimeType;
+          const sizeMB = fetched.buffer.byteLength / (1024 * 1024);
+          log(`视频获取完成 (${sizeMB.toFixed(1)} MB)`);
+        }
+
+        // ── Step 3: Gemini analysis ──
         send({ type: "stage", stage: "ANALYZE", message: "Gemini 分析中，请稍候..." });
 
+        const isVideoMode = type === "url" || type === "video_key";
         const scriptResult = await generateScript({
-          type: type === "video_b64" ? "video" : "theme",
-          videoB64: type === "video_b64" ? input : undefined,
-          mimeType: mime_type,
+          type: isVideoMode ? "video" : "theme",
+          videoBuffer: isVideoMode ? videoBuffer : undefined,
+          mimeType: isVideoMode ? videoMime : undefined,
           theme: type === "theme" ? input : undefined,
           modification,
-          imageUrls: imageUrls.slice(0, 1), // Use first image
+          imageUrls: imageUrls.slice(0, 1),
         });
 
         log(`Gemini 生成完成，共 ${scriptResult.shots?.length ?? 0} 个镜头`);
         send({ type: "script", data: scriptResult });
 
-        // ── Step 3: Sora submission ──
+        // ── Step 4: Sora submission ──
         const videoParams: VideoParams = {
           prompt: scriptResult.full_sora_prompt,
           imageUrls: imageUrls.slice(0, 1),
@@ -99,18 +150,21 @@ export async function POST(req: NextRequest) {
           return;
         }
 
-        // ── Step 4: Poll ──
+        // ── Step 5: Poll (fast timeout: max 3 minutes) ──
         send({ type: "stage", stage: "POLL", message: "等待视频生成..." });
 
-        const results = await pollTasks(taskIds, log);
+        const results = await pollTasks(taskIds, log, {
+          pollIntervalMs: 15_000,
+          maxWaitMs: 180_000, // 3 minutes
+        });
 
-        // Check if all failed
         const allFailed = [...results.values()].every((r) => !r.success);
         if (allFailed) {
           send({
             type: "error",
             code: "SORA_UNAVAILABLE",
-            message: "所有任务均失败",
+            message:
+              "所有任务均失败或超时，可以复制脚本到其他视频生成平台重试。",
             sora_prompt: scriptResult.full_sora_prompt,
           });
         } else {

@@ -1,5 +1,8 @@
 export const WORKSPACE_HEADER = "x-workspace-id";
-const STORAGE_KEY = "vidclaw-workspace-id";
+const INVITE_STORAGE_KEY = "vidclaw-invite-code";
+
+/** Valid invite codes — add new codes here to create isolated workspaces */
+const VALID_INVITE_CODES = new Set(["1214"]);
 
 export function normalizeWorkspaceId(value: string | null | undefined): string | null {
   const cleaned = (value ?? "").trim();
@@ -16,17 +19,23 @@ export function getWorkspaceIdFromHeaders(headers: Headers): string {
   return normalizeWorkspaceId(headers.get(WORKSPACE_HEADER)) ?? crypto.randomUUID().replace(/-/g, "");
 }
 
-export function getBrowserWorkspaceId(): string {
-  if (typeof window === "undefined") {
-    throw new Error("Workspace ID is only available in the browser");
-  }
+/** Deterministic workspace ID from invite code — same code = same workspace */
+export function workspaceIdFromInvite(code: string): string {
+  return `invite-${code}`;
+}
 
-  const existing = normalizeWorkspaceId(window.localStorage.getItem(STORAGE_KEY));
-  if (existing) {
-    return existing;
-  }
+export function isValidInviteCode(code: string): boolean {
+  return VALID_INVITE_CODES.has(code.trim());
+}
 
-  const created = crypto.randomUUID().replace(/-/g, "");
-  window.localStorage.setItem(STORAGE_KEY, created);
-  return created;
+export function getSavedInviteCode(): string | null {
+  if (typeof window === "undefined") return null;
+  const saved = window.localStorage.getItem(INVITE_STORAGE_KEY);
+  return saved && isValidInviteCode(saved) ? saved : null;
+}
+
+export function saveInviteCode(code: string): void {
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(INVITE_STORAGE_KEY, code.trim());
+  }
 }

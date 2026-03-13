@@ -104,13 +104,14 @@ function parseJson(raw: string): unknown {
 export async function generateScript(params: {
   type: "video" | "theme";
   videoB64?: string;
+  videoBuffer?: ArrayBuffer;
   mimeType?: string;
   theme?: string;
   modification?: string;
   imageUrls?: string[];
   promptTemplate?: string;
 }): Promise<ScriptResult> {
-  const { type, videoB64, mimeType, theme, modification, imageUrls, promptTemplate } = params;
+  const { type, videoB64, videoBuffer, mimeType, theme, modification, imageUrls, promptTemplate } = params;
 
   // Build instruction
   let instruction: string;
@@ -134,8 +135,15 @@ export async function generateScript(params: {
   }
 
   // Add video if remix mode
-  if (type === "video" && videoB64 && mimeType) {
-    parts.push({ inline_data: { mime_type: mimeType, data: videoB64 } });
+  if (type === "video" && mimeType) {
+    let b64 = videoB64;
+    if (!b64 && videoBuffer) {
+      // Convert ArrayBuffer to base64 server-side
+      b64 = Buffer.from(videoBuffer).toString("base64");
+    }
+    if (b64) {
+      parts.push({ inline_data: { mime_type: mimeType, data: b64 } });
+    }
   }
 
   parts.push({ text: instruction });

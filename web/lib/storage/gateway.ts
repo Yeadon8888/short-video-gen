@@ -40,8 +40,12 @@ function encodeKey(key: string): string {
 
 function getExtension(filename: string): string {
   const parts = filename.toLowerCase().split(".");
-  const ext = parts.length > 1 ? parts.pop() : "jpg";
-  return ext && /^[a-z0-9]+$/.test(ext) ? ext : "jpg";
+  const ext = parts.length > 1 ? parts.pop() : "bin";
+  return ext && /^[a-z0-9]+$/.test(ext) ? ext : "bin";
+}
+
+function isVideoContentType(contentType: string): boolean {
+  return contentType.startsWith("video/");
 }
 
 export function isUploadGatewayEnabled(): boolean {
@@ -192,4 +196,59 @@ export async function deleteAsset(workspaceId: string, key: string): Promise<boo
   });
 
   return true;
+}
+
+/**
+ * Upload a video file to the gateway (supports larger payloads).
+ * Returns the stored asset with a public URL.
+ */
+export async function uploadVideo(params: {
+  workspaceId: string;
+  filename: string;
+  data: ArrayBuffer;
+  contentType: string;
+}): Promise<StoredAsset> {
+  const config = getConfig();
+  if (!config) {
+    throw new Error("UPLOAD_API_URL or UPLOAD_API_KEY is not set");
+  }
+
+  const ext = getExtension(params.filename);
+  const key = `${buildWorkspacePrefix(config, params.workspaceId)}/vid-${crypto.randomUUID()}.${ext}`;
+  const result = await requestJson<StoredAsset & { success?: boolean }>({
+    method: "POST",
+    url: `${config.baseUrl}/upload?key=${encodeURIComponent(key)}`,
+    headers: {
+      "x-upload-key": config.apiKey,
+      "Content-Type": params.contentType || "video/mp4",
+    },
+    body: params.data,
+    timeoutSeconds: 180,
+  });
+  return {
+    key: result.key,
+    url: result.url,
+    size: result.size,
+    uploadedAt: result.uploadedAt,
+  };
+}
+
+/**
+ * Download an asset from its public URL and return the raw bytes
+ * along with its MIME type. Used to fetch videos for Gemini analysis.
+ */
+export async function fetchAssetBuffer(url: string): Promise<{
+  buffer: ArrayBuffer;
+  mimeType: string;
+}> {
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(120_000),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch asset: HTTP ${res.status}`);
+  }
+  const buffer = await res.arrayBuffer();
+  const ct = res.headers.get("content-type") ?? "application/octet-stream";
+  return { buffer, mimeType: ct.split(";")[0].trim() };
 }

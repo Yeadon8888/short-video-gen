@@ -172,8 +172,8 @@ export async function pollTasks(
     maxWaitMs?: number;
   }
 ): Promise<Map<string, TaskResult>> {
-  const pollIntervalMs = options?.pollIntervalMs ?? 30_000;
-  const maxWaitMs = options?.maxWaitMs ?? 1_800_000;
+  const pollIntervalMs = options?.pollIntervalMs ?? 15_000;
+  const maxWaitMs = options?.maxWaitMs ?? 180_000; // 3 min default
   const pending = new Set(taskIds);
   const results = new Map<string, TaskResult>();
   let elapsedMs = 0;

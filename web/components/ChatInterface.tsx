@@ -6,12 +6,18 @@ import MessageBubble, { type Message } from "./MessageBubble";
 import ParamBar from "./ParamBar";
 import ImageManager from "./ImageManager";
 import type { ScriptResult } from "@/lib/gemini";
-import { getBrowserWorkspaceId, WORKSPACE_HEADER } from "@/lib/workspace";
+import {
+  WORKSPACE_HEADER,
+  isValidInviteCode,
+  getSavedInviteCode,
+  saveInviteCode,
+  workspaceIdFromInvite,
+} from "@/lib/workspace";
 
 const WELCOME_MESSAGE: Message = {
   id: "welcome",
   role: "ai",
-  text: "你好！我可以帮你生成短视频。告诉我一个创意主题，或上传视频文件进行二创。",
+  text: "你好！我可以帮你生成短视频。\n\n• 输入创意主题 → 直接生成\n• 粘贴抖音/TikTok 链接 → 二创视频\n• 上传本地视频文件 → 二创视频",
 };
 
 interface Params {
@@ -30,13 +36,11 @@ interface SSEEvent {
   sora_prompt?: string;
 }
 
-const INVITE_CODE = "1214";
-const INVITE_STORAGE_KEY = "vidclaw_invite_verified";
+/** Detect Douyin / TikTok share URLs */
+const VIDEO_URL_PATTERN =
+  /https?:\/\/[^\s<>"']*(?:douyin|tiktok|v\.douyin)[^\s<>"']*/i;
 
 export default function ChatInterface() {
-  const [authorized, setAuthorized] = useState(false);
-  const [inviteInput, setInviteInput] = useState("");
-  const [inviteError, setInviteError] = useState("");
   const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -44,6 +48,9 @@ export default function ChatInterface() {
   const [workspaceId, setWorkspaceId] = useState("");
   const [imageCount, setImageCount] = useState(0);
   const [gatewayEnabled, setGatewayEnabled] = useState(true);
+  const [authorized, setAuthorized] = useState(false);
+  const [inviteInput, setInviteInput] = useState("");
+  const [inviteError, setInviteError] = useState("");
   const [params, setParams] = useState<Params>({
     orientation: "portrait",
     duration: 15,
@@ -59,24 +66,12 @@ export default function ChatInterface() {
   }, [messages]);
 
   useEffect(() => {
-    if (typeof window !== "undefined" && localStorage.getItem(INVITE_STORAGE_KEY) === "true") {
+    const saved = getSavedInviteCode();
+    if (saved) {
       setAuthorized(true);
+      setWorkspaceId(workspaceIdFromInvite(saved));
     }
   }, []);
-
-  useEffect(() => {
-    setWorkspaceId(getBrowserWorkspaceId());
-  }, []);
-
-  function handleInviteSubmit() {
-    if (inviteInput.trim() === INVITE_CODE) {
-      localStorage.setItem(INVITE_STORAGE_KEY, "true");
-      setAuthorized(true);
-      setInviteError("");
-    } else {
-      setInviteError("邀请码不正确，请重新输入");
-    }
-  }
 
   useEffect(() => {
     if (workspaceId) {
@@ -107,9 +102,8 @@ export default function ChatInterface() {
   }
 
   async function sendRequest(body: {
-    type: "video_b64" | "theme";
+    type: "theme" | "video_key" | "url";
     input: string;
-    mime_type?: string;
     modification?: string;
   }) {
     if (!workspaceId) return;
@@ -215,13 +209,18 @@ export default function ChatInterface() {
     if (!text || isLoading) return;
     setInput("");
 
-    // Add user message
+    // Detect if user pasted a video URL
+    const isUrl = VIDEO_URL_PATTERN.test(text);
+
     setMessages((prev) => [
       ...prev,
-      { id: uuidv4(), role: "user", text },
+      { id: uuidv4(), role: "user", text: isUrl ? `🔗 ${text}` : text },
     ]);
 
-    await sendRequest({ type: "theme", input: text });
+    await sendRequest({
+      type: isUrl ? "url" : "theme",
+      input: text,
+    });
   }
 
   async function handleVideoFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -229,28 +228,63 @@ export default function ChatInterface() {
     if (!file) return;
     if (fileInputRef.current) fileInputRef.current.value = "";
 
-    // Add user message
+    const modification = input.trim() || undefined;
+    setInput("");
+
     setMessages((prev) => [
       ...prev,
       { id: uuidv4(), role: "user", text: `📎 ${file.name}` },
     ]);
 
-    // Encode to base64
-    const arrayBuffer = await file.arrayBuffer();
-    const bytes = new Uint8Array(arrayBuffer);
-    let binary = "";
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    const b64 = btoa(binary);
+    // Upload video to R2 gateway instead of base64-encoding on client
+    const aiMsgId = uuidv4();
+    setMessages((prev) => [
+      ...prev,
+      { id: aiMsgId, role: "ai", logs: ["正在上传视频..."], isLoading: true, stage: "DOWNLOAD" },
+    ]);
+    setIsLoading(true);
 
-    await sendRequest({
-      type: "video_b64",
-      input: b64,
-      mime_type: file.type || "video/mp4",
-      modification: input.trim() || undefined,
-    });
-    setInput("");
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const uploadRes = await fetch("/api/images", {
+        method: "POST",
+        headers: { [WORKSPACE_HEADER]: workspaceId },
+        body: formData,
+      });
+      if (!uploadRes.ok) {
+        updateLastAiMessage((msg) => ({
+          ...msg,
+          isLoading: false,
+          error: { code: "UPLOAD_FAILED", message: `视频上传失败: HTTP ${uploadRes.status}` },
+        }));
+        return;
+      }
+
+      const asset = await uploadRes.json();
+      const videoUrl = asset.url as string;
+      updateLastAiMessage((msg) => ({
+        ...msg,
+        logs: [...(msg.logs ?? []), `视频已上传 (${(file.size / 1024 / 1024).toFixed(1)} MB)`],
+      }));
+
+      // Remove the upload placeholder and send the real request
+      setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
+      setIsLoading(false);
+
+      await sendRequest({
+        type: "video_key",
+        input: videoUrl,
+        modification,
+      });
+    } catch (err) {
+      updateLastAiMessage((msg) => ({
+        ...msg,
+        isLoading: false,
+        error: { code: "UPLOAD_FAILED", message: String(err) },
+      }));
+      setIsLoading(false);
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -266,42 +300,44 @@ export default function ChatInterface() {
         className="flex items-center justify-center h-screen"
         style={{ background: "#0A0A0F" }}
       >
-        <div
-          className="flex flex-col items-center gap-6 p-8 rounded-2xl w-full max-w-sm"
-          style={{ background: "#13131A", border: "1px solid #1E1E2E" }}
-        >
-          <div className="flex items-center gap-2">
-            <span className="text-2xl">⚡</span>
-            <span className="text-xl font-semibold gradient-text">VidClaw</span>
-          </div>
-          <p className="text-slate-400 text-sm text-center">
-            请输入邀请码以继续使用
-          </p>
+        <div className="w-80 space-y-4 text-center">
+          <div className="text-lg font-semibold gradient-text">VidClaw 内测</div>
           <input
             type="text"
             value={inviteInput}
-            onChange={(e) => {
-              setInviteInput(e.target.value);
-              setInviteError("");
-            }}
+            onChange={(e) => { setInviteInput(e.target.value); setInviteError(""); }}
             onKeyDown={(e) => {
-              if (e.key === "Enter") handleInviteSubmit();
+              if (e.key === "Enter") {
+                const code = inviteInput.trim();
+                if (isValidInviteCode(code)) {
+                  saveInviteCode(code);
+                  setAuthorized(true);
+                  setWorkspaceId(workspaceIdFromInvite(code));
+                } else {
+                  setInviteError("邀请码无效");
+                }
+              }
             }}
             placeholder="请输入邀请码"
-            className="w-full px-4 py-2.5 rounded-lg text-sm text-white placeholder-slate-500 outline-none focus:ring-2 focus:ring-purple-500"
-            style={{ background: "#0A0A0F", border: "1px solid #2A2A3E" }}
+            className="w-full px-4 py-3 rounded-xl text-white text-center text-sm outline-none"
+            style={{ background: "#1E1E2E", border: "1px solid #2D2D44" }}
           />
-          {inviteError && (
-            <p className="text-red-400 text-xs">{inviteError}</p>
-          )}
+          {inviteError && <div className="text-red-400 text-sm">{inviteError}</div>}
           <button
-            onClick={handleInviteSubmit}
-            className="w-full py-2.5 rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90"
-            style={{
-              background: "linear-gradient(135deg, #7C3AED, #3B82F6)",
+            onClick={() => {
+              const code = inviteInput.trim();
+              if (isValidInviteCode(code)) {
+                saveInviteCode(code);
+                setAuthorized(true);
+                setWorkspaceId(workspaceIdFromInvite(code));
+              } else {
+                setInviteError("邀请码无效");
+              }
             }}
+            className="w-full px-4 py-3 rounded-xl text-white font-medium text-sm"
+            style={{ background: "linear-gradient(135deg, #7C3AED, #2563EB)" }}
           >
-            验证
+            进入
           </button>
         </div>
       </div>
@@ -321,7 +357,7 @@ export default function ChatInterface() {
         </div>
         <div className="flex items-center gap-3">
           <span className="text-sm text-slate-400">
-            {workspaceId ? `工作区 ${workspaceId.slice(0, 8)}` : "初始化中..."}
+            {workspaceId ? `工作区 ${workspaceId}` : "初始化中..."}
           </span>
           <button
             onClick={() => setImageManagerOpen(true)}
@@ -346,9 +382,9 @@ export default function ChatInterface() {
           </div>
           <div className="rounded-2xl p-4" style={{ background: "#161622", border: "1px solid #242438" }}>
             <div className="text-xs text-slate-400 mb-2">Step 2</div>
-            <div className="text-white font-semibold">输入主题或上传原视频</div>
+            <div className="text-white font-semibold">输入主题、链接或上传视频</div>
             <div className="text-sm text-slate-400 mt-2">
-              Gemini 先拆脚本，再交给柏拉图 Sora2 生成。
+              支持粘贴抖音/TikTok 链接二创，Gemini 拆脚本，柏拉图 Sora2 生成。
             </div>
           </div>
           <div className="rounded-2xl p-4" style={{ background: "#161622", border: "1px solid #242438" }}>
@@ -406,7 +442,7 @@ export default function ChatInterface() {
             {/* Video upload button */}
             <button
               onClick={() => fileInputRef.current?.click()}
-              disabled={isLoading || !workspaceId || imageCount === 0}
+              disabled={isLoading || !authorized || imageCount === 0}
               className="p-2 rounded-lg text-slate-400 hover:text-white transition-colors shrink-0 disabled:opacity-40"
               title="上传视频进行二创"
             >
@@ -425,16 +461,16 @@ export default function ChatInterface() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={imageCount === 0 ? "先上传参考图，再输入创意主题或上传视频..." : "输入创意主题，或上传视频进行二创..."}
+              placeholder={imageCount === 0 ? "先上传参考图，再输入主题、粘贴链接或上传视频..." : "输入创意主题，粘贴抖音/TikTok 链接，或上传视频..."}
               rows={1}
-              disabled={isLoading || !workspaceId || imageCount === 0}
+              disabled={isLoading || !authorized || imageCount === 0}
               className="flex-1 resize-none bg-transparent text-white placeholder-slate-500 text-sm outline-none py-2 max-h-32"
               style={{ lineHeight: "1.5" }}
             />
 
             <button
               onClick={handleSend}
-              disabled={!input.trim() || isLoading || !workspaceId || imageCount === 0}
+              disabled={!input.trim() || isLoading || !authorized || imageCount === 0}
               className="shrink-0 px-4 py-2 rounded-lg font-medium text-sm text-white transition-all disabled:opacity-40"
               style={{
                 background: isLoading
