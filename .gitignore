@@ -10,6 +10,7 @@ image/*.jpg
 # 公司专属 prompt（本地实际使用，不提交）
 prompts.md
 prompts.local.md
+.task_state.json
 scripts/__pycache__/
 scripts/lib/__pycache__/
 **/*.pyc

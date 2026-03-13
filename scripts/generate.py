@@ -39,6 +39,7 @@ MAX_VIDEO_SIZE_MB = 50  # Gemini inline_data 建议上限
 _SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROMPTS_PATH = os.path.join(_SKILL_DIR, "prompts.md")
 PROMPTS_EXAMPLE_PATH = os.path.join(_SKILL_DIR, "prompts.md.example")
+TASK_STATE_PATH = os.path.join(_SKILL_DIR, ".task_state.json")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -739,6 +740,22 @@ def create_video_tasks(api_key, prompt, image_urls, orientation, duration, count
     return task_ids
 
 
+def query_task_status(api_key, task_id):
+    """查询单个任务状态，返回 (status, progress, video_url, fail_reason)"""
+    result = api_request(
+        "GET",
+        f"/v2/videos/generations/{task_id}",
+        api_key,
+        base_url=get_video_base_url(),
+    )
+    status = str(result.get("status", "UNKNOWN")).upper()
+    progress = str(result.get("progress", "0%"))
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    video_url = data.get("output") if isinstance(data, dict) else None
+    fail_reason = result.get("fail_reason", "")
+    return status, progress, video_url, fail_reason
+
+
 def poll_tasks(api_key, task_ids, poll_interval=30, max_wait=1800):
     """轮询任务状态，直到全部完成或失败，最多等待 max_wait 秒（默认 30 分钟）"""
     terminal_statuses = {"SUCCESS", "FAILURE"}
@@ -758,32 +775,97 @@ def poll_tasks(api_key, task_ids, poll_interval=30, max_wait=1800):
                 results[task_id] = {"success": False, "url": None, "status": "timeout"}
             break
         for task_id in list(pending):
-            result = api_request(
-                "GET",
-                f"/v2/videos/generations/{task_id}",
-                api_key,
-                base_url=get_video_base_url(),
-            )
-            status = str(result.get("status", "UNKNOWN")).upper()
-            print(f"  [POLL] {task_id[:24]}… status={status} elapsed={elapsed}s", flush=True)
+            status, progress, video_url, fail_reason = query_task_status(api_key, task_id)
+            print(f"  [POLL] {task_id[:24]}… status={status} progress={progress} elapsed={elapsed}s", flush=True)
 
             if status in terminal_statuses:
-                data = result.get("data") if isinstance(result.get("data"), dict) else {}
-                video_url = data.get("output") if isinstance(data, dict) else None
                 success = status == "SUCCESS"
                 results[task_id] = {
                     "success": success,
                     "url": video_url,
                     "status": status,
-                    "fail_reason": result.get("fail_reason", ""),
+                    "fail_reason": fail_reason,
                 }
                 pending.remove(task_id)
                 if success:
                     print(f"  ✅ 完成！视频 URL: {video_url}", flush=True)
                 else:
-                    print(f"  ❌ 任务失败（状态: {status}）{result.get('fail_reason', '')}", flush=True)
+                    print(f"  ❌ 任务失败（状态: {status}）{fail_reason}", flush=True)
 
     return results
+
+
+def save_task_state(task_ids, copy_data, sora_prompt, model):
+    """保存任务状态到文件，供 --check 恢复使用"""
+    state = {
+        "task_ids": task_ids,
+        "copy_data": copy_data,
+        "sora_prompt": sora_prompt,
+        "model": model,
+        "created_at": datetime.datetime.now().isoformat(),
+    }
+    with open(TASK_STATE_PATH, "w") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+    print(f"  💾 任务状态已保存: {TASK_STATE_PATH}", flush=True)
+
+
+def load_task_state():
+    """加载上次保存的任务状态"""
+    if not os.path.exists(TASK_STATE_PATH):
+        return None
+    with open(TASK_STATE_PATH) as f:
+        return json.load(f)
+
+
+def check_tasks(api_key, task_ids_str=None):
+    """快速检查任务状态（不阻塞），适用于 OpenClaw 短会话场景"""
+    # 确定要检查的 task_ids
+    state = load_task_state()
+    if task_ids_str:
+        task_ids = [t.strip() for t in task_ids_str.split(",") if t.strip()]
+    elif state:
+        task_ids = state["task_ids"]
+    else:
+        print("❌ 未指定 task_ids 且无历史状态文件", file=sys.stderr)
+        sys.exit(1)
+
+    copy_data = state.get("copy_data") if state else None
+    all_done = True
+    any_success = False
+
+    print(f"\n{'='*60}")
+    print("📊 任务状态检查")
+    print(f"{'='*60}")
+
+    for task_id in task_ids:
+        status, progress, video_url, fail_reason = query_task_status(api_key, task_id)
+        icon = "✅" if status == "SUCCESS" else "❌" if status == "FAILURE" else "⏳"
+        print(f"  {icon} {task_id[:30]}…  status={status}  progress={progress}")
+        if status == "SUCCESS":
+            print(f"     视频: {video_url}")
+            any_success = True
+        elif status == "FAILURE":
+            print(f"     原因: {fail_reason}")
+        else:
+            all_done = False
+
+    if all_done and any_success and copy_data:
+        print(f"\n📋 视频文案")
+        print(f"{'─'*60}")
+        print(f"  标题：{copy_data.get('title', '')}")
+        print(f"  文案：{copy_data.get('caption', '')}")
+        if copy_data.get('first_comment'):
+            print(f"  首评：{copy_data.get('first_comment', '')}")
+
+    print(f"{'='*60}")
+    if all_done:
+        print("✅ 全部任务已完成")
+        # 清理状态文件
+        if os.path.exists(TASK_STATE_PATH):
+            os.unlink(TASK_STATE_PATH)
+    else:
+        print("⏳ 仍有任务进行中，请稍后再次 --check")
+    print(f"{'='*60}")
 
 
 def _extract_sora_prompt(raw: str) -> str:
@@ -822,6 +904,11 @@ def main():
   # 生产模式（直接提示词 + 可选产品图）
   python3 generate.py --prompt "A sleek product showcase with cinematic lighting"
   python3 generate.py --prompt "Urban street style video" --images ./imgs --orientation landscape
+
+  # OpenClaw 短会话模式（分步执行）
+  python3 generate.py --prompt "猫咪在夜市" --submit     # 提交任务，立即返回
+  python3 generate.py --check                             # 检查状态（不阻塞）
+  python3 generate.py --check task_id1,task_id2           # 检查指定任务
         """,
     )
     parser.add_argument("--video", metavar="PATH", help="本地视频文件（二创模式）")
@@ -855,12 +942,35 @@ def main():
         default=None,
         help="视频生成模型，默认 veo3.1-fast。可选: veo3.1-fast / veo3.1-components / veo3.1-pro-4k / sora",
     )
+    parser.add_argument(
+        "--submit",
+        action="store_true",
+        help="仅提交任务不等待结果（适用于 OpenClaw 等短会话环境），状态保存到 .task_state.json",
+    )
+    parser.add_argument(
+        "--check",
+        metavar="TASK_IDS",
+        nargs="?",
+        const="__from_state__",
+        help="检查任务状态（不阻塞）。可传入逗号分隔的 task_ids，或不传参数则从上次 --submit 的状态恢复",
+    )
 
     args = parser.parse_args()
 
     # --images 0 表示明确禁用产品图
     if args.images == "0":
         args.images = None
+
+    # ── CHECK 模式（快速查询，不阻塞） ───────────────────────────────────────
+    if args.check is not None:
+        load_env()
+        api_key = os.environ.get("VIDEO_API_KEY") or os.environ.get("PLATO_API_KEY") or os.environ.get("YUNWU_API_KEY")
+        if not api_key:
+            print("❌ 未找到 VIDEO_API_KEY", file=sys.stderr)
+            sys.exit(1)
+        task_ids_arg = None if args.check == "__from_state__" else args.check
+        check_tasks(api_key, task_ids_arg)
+        return
 
     # ── PRECHECK ─────────────────────────────────────────────────────────────
     with _stage("PRECHECK") as s:
@@ -959,6 +1069,20 @@ def main():
 
         task_ids = create_video_tasks(api_key, script, image_urls, args.orientation, args.duration, args.count, model=video_model)
         s["result"] = f"{len(task_ids)} tasks submitted"
+
+    # ── SUBMIT 模式：保存状态后退出，不等待 ──────────────────────────────────
+    if args.submit:
+        save_task_state(task_ids, copy_data, script, video_model)
+        print(f"\n{'='*60}")
+        print("📤 任务已提交（--submit 模式，不等待结果）")
+        print(f"{'='*60}")
+        print(f"  任务 IDs: {', '.join(task_ids)}")
+        print(f"  检查状态: python3 scripts/generate.py --check")
+        print(f"{'='*60}")
+        # 清理临时下载的视频文件
+        if tmp_video_path and os.path.exists(tmp_video_path):
+            os.unlink(tmp_video_path)
+        return
 
     # ── POLL ──────────────────────────────────────────────────────────────────
     with _stage("POLL") as s:
