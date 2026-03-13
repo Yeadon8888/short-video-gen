@@ -310,8 +310,16 @@ export default function ChatInterface() {
           .map((r) => `${r.taskId}:${r.status}:${r.progress}`)
           .join("|");
 
+        // Parse max progress across all tasks
+        const maxProgress = Math.max(
+          ...results.map((r) => parseInt(r.progress) || 0)
+        );
+
         if (currentProgressKey === lastProgressKey) {
-          staleCount++;
+          // If any task is near completion (≥80%), stay patient — don't count as stale
+          if (maxProgress < 80) {
+            staleCount++;
+          }
           if (staleCount >= STALE_LIMIT) {
             updateLastAiMessage((msg) => ({
               ...msg,
