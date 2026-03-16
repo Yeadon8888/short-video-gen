@@ -10,12 +10,19 @@
     },
     "src/app/api/cron/scheduled/route.ts": {
       "maxDuration": 300
+    },
+    "src/app/api/cron/timeout/route.ts": {
+      "maxDuration": 300
     }
   },
   "crons": [
     {
       "path": "/api/cron/scheduled",
       "schedule": "0 18 * * *"
+    },
+    {
+      "path": "/api/cron/timeout",
+      "schedule": "*/30 * * * *"
     }
   ]
 }
