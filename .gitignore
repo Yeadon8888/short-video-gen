@@ -33,3 +33,5 @@ vidclaw-v2/.env.local
 # Root-level artifacts
 node_modules/
 .playwright-mcp/
+stitch/
+.env
