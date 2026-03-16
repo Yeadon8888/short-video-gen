@@ -16,7 +16,7 @@ import {
 } from "@/lib/tikhub";
 import { db } from "@/lib/db";
 import { tasks, taskItems, creditTxns, users, models } from "@/lib/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, and } from "drizzle-orm";
 
 export const maxDuration = 300; // Vercel max
 
@@ -117,7 +117,6 @@ export async function POST(req: NextRequest) {
           const dl = await downloadVideoFromUrl(url, log);
           videoBuffer = dl.buffer;
           videoMime = dl.mimeType;
-          log(`视频下载完成 (${dl.sizeMB.toFixed(1)} MB)`);
         } else if (type === "video_key") {
           send({ type: "stage", stage: "DOWNLOAD", message: "正在获取视频..." });
           const fetched = await fetchAssetBuffer(input);
@@ -223,11 +222,20 @@ export async function POST(req: NextRequest) {
             })
             .returning();
 
-          // Deduct credits
-          await db
+          // Deduct credits atomically — WHERE credits >= cost prevents overdraft
+          const [deducted] = await db
             .update(users)
             .set({ credits: sql`${users.credits} - ${totalCost}` })
-            .where(eq(users.id, user.id));
+            .where(and(eq(users.id, user.id), sql`${users.credits} >= ${totalCost}`))
+            .returning({ credits: users.credits });
+
+          if (!deducted) {
+            await db.update(tasks).set({ status: "failed", errorMessage: "积分不足（并发扣费）" }).where(eq(tasks.id, task.id));
+            send({ type: "error", code: "INSUFFICIENT_CREDITS", message: "积分不足，请充值后重试。" });
+            send({ type: "done" });
+            controller.close();
+            return;
+          }
 
           await db.insert(creditTxns).values({
             userId: user.id,
@@ -236,7 +244,7 @@ export async function POST(req: NextRequest) {
             reason: `定时生成 (${modelSlug} × ${count})`,
             modelId: modelRow?.id,
             taskId: task.id,
-            balanceAfter: user.credits - totalCost,
+            balanceAfter: deducted.credits,
           });
 
           log(`任务已加入定时托管，将在凌晨 2:00 执行`);
@@ -312,11 +320,21 @@ export async function POST(req: NextRequest) {
           });
         }
 
-        // Deduct credits atomically
-        await db
+        // Deduct credits atomically — WHERE credits >= cost prevents overdraft
+        const [deducted] = await db
           .update(users)
           .set({ credits: sql`${users.credits} - ${totalCost}` })
-          .where(eq(users.id, user.id));
+          .where(and(eq(users.id, user.id), sql`${users.credits} >= ${totalCost}`))
+          .returning({ credits: users.credits });
+
+        if (!deducted) {
+          // Race condition: another request already consumed the credits
+          await db.update(tasks).set({ status: "failed", errorMessage: "积分不足（并发扣费）" }).where(eq(tasks.id, task.id));
+          send({ type: "error", code: "INSUFFICIENT_CREDITS", message: "积分不足，请充值后重试。" });
+          send({ type: "done" });
+          controller.close();
+          return;
+        }
 
         // Record credit transaction
         await db.insert(creditTxns).values({
@@ -326,7 +344,7 @@ export async function POST(req: NextRequest) {
           reason: `视频生成 (${modelSlug} × ${count})`,
           modelId: modelRow?.id,
           taskId: task.id,
-          balanceAfter: user.credits - totalCost,
+          balanceAfter: deducted.credits,
         });
 
         // ── Step 6: Return task IDs ──
