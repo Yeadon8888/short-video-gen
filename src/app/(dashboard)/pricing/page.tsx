@@ -78,11 +78,11 @@ const plans = [
     border: "border-amber-500/30",
     features: [
       "无限积分",
-      "私有化部署",
+      "公式化爆款视频拆解",
+      "完形填空式内容生产",
       "接入龙虾自动化数字员工",
-      "API 对接",
-      "专属客服",
-      "定制开发",
+      "API 对接 & 私有化部署",
+      "专属客服 & 定制开发",
     ],
   },
 ];
@@ -239,18 +239,18 @@ export default function PricingPage() {
         <div className="flex items-center gap-2 rounded-xl border border-blue-500/20 bg-blue-500/5 px-4 py-3">
           <MessageCircle className="h-5 w-5 shrink-0 text-blue-400" />
           <div className="text-sm text-blue-300/90">
-            <p className="font-medium">支付接口正在开发中</p>
+            <p className="font-medium">充值流程</p>
             <p className="mt-0.5 text-blue-300/70">
-              当前采用微信扫码 + 人工确认的方式充值，付款后请备注邮箱，通常 5 分钟内到账。
+              扫码添加好友 → 备注「体验包」或「创作者套餐」 → 转账对应金额 → 5 分钟内人工充值到账。支付接口正在开发中，当前采用人工确认方式。
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
           <Building2 className="h-5 w-5 shrink-0 text-amber-400" />
           <div className="text-sm text-amber-300/90">
-            <p className="font-medium">企业部署 & 龙虾自动化数字员工</p>
+            <p className="font-medium">企业部署 · 公式化爆款拆解</p>
             <p className="mt-0.5 text-amber-300/70">
-              支持私有化部署、API 接口对接、接入龙虾自动化数字员工体系，按需定制。
+              专业拆解爆款视频逻辑，用「完形填空」的方式做内容生产 —— 让爆款更有规律，内容创作跟喝水一样简单。接入龙虾自动化数字员工，实现视频具体规模化批量生产。
             </p>
           </div>
         </div>
@@ -282,8 +282,8 @@ export default function PricingPage() {
                 </h3>
                 <p className="mt-1 text-sm text-[var(--vc-text-muted)]">
                   {selectedPlan === "enterprise"
-                    ? "扫码添加微信，详细沟通需求方案"
-                    : `付款 ¥${plans.find((p) => p.id === selectedPlan)?.price ?? ""} 后备注您的注册邮箱`}
+                    ? "扫码添加微信，详细沟通企业部署方案"
+                    : `扫码添加好友，备注「${plans.find((p) => p.id === selectedPlan)?.name ?? ""}」，转账 ¥${plans.find((p) => p.id === selectedPlan)?.price ?? ""}`}
                 </p>
               </div>
 
@@ -299,17 +299,17 @@ export default function PricingPage() {
                 </div>
               </div>
 
-              {selectedPlan !== "enterprise" && (
-                <div className="space-y-2 text-sm text-[var(--vc-text-secondary)]">
-                  <div className="flex items-center justify-center gap-2">
-                    <Clock className="h-4 w-4 text-[var(--vc-accent)]" />
-                    <span>付款后通常 5 分钟内到账</span>
-                  </div>
-                  <p className="text-xs text-[var(--vc-text-dim)]">
-                    请备注您的注册邮箱，以便我们为您充值积分
-                  </p>
+              <div className="space-y-2 text-sm text-[var(--vc-text-secondary)]">
+                <div className="flex items-center justify-center gap-2">
+                  <Clock className="h-4 w-4 text-[var(--vc-accent)]" />
+                  <span>添加好友后 5 分钟内人工充值到账</span>
                 </div>
-              )}
+                <p className="text-xs text-[var(--vc-text-dim)]">
+                  {selectedPlan === "enterprise"
+                    ? "添加好友后备注「企业咨询」，我们会尽快联系您"
+                    : "请备注套餐名称 + 注册邮箱，转账后即可充值"}
+                </p>
+              </div>
             </div>
           </div>
         </div>
