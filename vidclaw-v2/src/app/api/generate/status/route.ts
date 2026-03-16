@@ -92,49 +92,66 @@ export async function GET(req: NextRequest) {
         .from(taskItems)
         .where(eq(taskItems.taskId, firstItem.taskId));
 
-      const hasAnySuccess = allItems.some((i) => i.status === "SUCCESS");
+      const successCount = allItems.filter((i) => i.status === "SUCCESS").length;
+      const failedCount = allItems.filter((i) => i.status === "FAILED").length;
+      const totalCount = allItems.length;
+      const hasAnySuccess = successCount > 0;
       const successUrls = allItems
         .filter((i) => i.status === "SUCCESS" && i.resultUrl)
         .map((i) => i.resultUrl!);
+
+      // Get parent task for credit calculation
+      const [parentTask] = await db
+        .select()
+        .from(tasks)
+        .where(eq(tasks.id, firstItem.taskId))
+        .limit(1);
+
+      // Calculate per-item cost and refund for failed items
+      const perItemCost = parentTask && totalCount > 0
+        ? Math.floor(parentTask.creditsCost / totalCount)
+        : 0;
+      const refundAmount = failedCount * perItemCost;
+      const actualCost = parentTask ? parentTask.creditsCost - refundAmount : 0;
 
       await db
         .update(tasks)
         .set({
           status: hasAnySuccess ? "done" : "failed",
           resultUrls: successUrls,
+          creditsCost: hasAnySuccess ? actualCost : 0,
           completedAt: new Date(),
-          ...(!hasAnySuccess ? { errorMessage: "视频生成失败，积分已自动退还" } : {}),
+          ...(!hasAnySuccess
+            ? { errorMessage: "视频生成失败，积分已自动退还" }
+            : failedCount > 0
+              ? { errorMessage: `${successCount}/${totalCount} 成功，失败部分积分已退还` }
+              : {}),
         })
         .where(eq(tasks.id, firstItem.taskId));
 
-      // Auto-refund if all tasks failed
-      if (!hasAnySuccess) {
-        const [parentTask] = await db
-          .select()
-          .from(tasks)
-          .where(eq(tasks.id, firstItem.taskId))
+      // Refund for failed items (partial or full)
+      if (refundAmount > 0 && parentTask) {
+        await db
+          .update(users)
+          .set({ credits: sql`${users.credits} + ${refundAmount}` })
+          .where(eq(users.id, parentTask.userId));
+
+        const [u] = await db
+          .select({ credits: users.credits })
+          .from(users)
+          .where(eq(users.id, parentTask.userId))
           .limit(1);
-        if (parentTask && parentTask.creditsCost > 0) {
-          await db
-            .update(users)
-            .set({ credits: sql`${users.credits} + ${parentTask.creditsCost}` })
-            .where(eq(users.id, parentTask.userId));
 
-          const [u] = await db
-            .select({ credits: users.credits })
-            .from(users)
-            .where(eq(users.id, parentTask.userId))
-            .limit(1);
-
-          await db.insert(creditTxns).values({
-            userId: parentTask.userId,
-            type: "refund",
-            amount: parentTask.creditsCost,
-            reason: `生成失败自动退款`,
-            taskId: parentTask.id,
-            balanceAfter: u?.credits ?? 0,
-          });
-        }
+        await db.insert(creditTxns).values({
+          userId: parentTask.userId,
+          type: "refund",
+          amount: refundAmount,
+          reason: hasAnySuccess
+            ? `部分失败退款 (${failedCount}/${totalCount} 失败)`
+            : `生成失败自动退款`,
+          taskId: parentTask.id,
+          balanceAfter: u?.credits ?? 0,
+        });
       }
     }
   }

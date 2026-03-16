@@ -45,6 +45,10 @@ export function TaskList({ initialTasks }: { initialTasks: Task[] }) {
         const cfg = statusConfig[task.status] ?? statusConfig.pending;
         const Icon = cfg.icon;
         const resultUrls = (task.resultUrls as string[]) ?? [];
+        const params = task.paramsJson as { count?: number } | null;
+        const requestedCount = params?.count ?? 1;
+        const successCount = resultUrls.length;
+        const isPartial = task.status === "done" && successCount < requestedCount;
 
         return (
           <div
@@ -60,7 +64,11 @@ export function TaskList({ initialTasks }: { initialTasks: Task[] }) {
                       : ""
                   }`}
                 />
-                <span className={`text-sm ${cfg.color}`}>{cfg.label}</span>
+                <span className={`text-sm ${cfg.color}`}>
+                  {task.status === "done" && requestedCount > 1
+                    ? `${successCount}/${requestedCount} 完成`
+                    : cfg.label}
+                </span>
                 <span className="rounded-[var(--vc-radius-sm)] bg-[var(--vc-bg-elevated)] px-1.5 py-0.5 text-xs text-[var(--vc-text-muted)]">
                   {task.type}
                 </span>
