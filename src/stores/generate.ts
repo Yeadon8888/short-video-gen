@@ -21,7 +21,7 @@ export interface ScriptResult {
 
 export interface GenerateParams {
   orientation: "portrait" | "landscape";
-  duration: 10 | 15;
+  duration: 8 | 10 | 15;
   count: number;
   platform: "douyin" | "tiktok";
   model: string;
@@ -69,7 +69,7 @@ interface GenerateState {
 
 const defaultParams: GenerateParams = {
   orientation: "portrait",
-  duration: 15,
+  duration: 8,
   count: 1,
   platform: "douyin",
   model: "veo3.1-fast",
