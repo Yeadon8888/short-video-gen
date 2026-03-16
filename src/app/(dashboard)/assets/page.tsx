@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { userAssets } from "@/lib/db/schema";
 import { requireAuth } from "@/lib/auth";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 import { AssetGrid } from "./AssetGrid";
 
 export default async function AssetsPage() {
@@ -12,7 +12,7 @@ export default async function AssetsPage() {
   const assets = await db
     .select()
     .from(userAssets)
-    .where(eq(userAssets.userId, user.id))
+    .where(and(eq(userAssets.userId, user.id), eq(userAssets.type, "image")))
     .orderBy(desc(userAssets.createdAt))
     .limit(100);
 
