@@ -33,6 +33,18 @@ export function ParamBar() {
       .catch(() => {});
   }, []);
 
+  const isVeo = params.model.startsWith("veo");
+  const isSora = !isVeo;
+
+  // Auto-fix duration when switching models
+  useEffect(() => {
+    if (isVeo && params.duration !== 8) {
+      setParams({ duration: 8 });
+    } else if (isSora && params.duration === 8) {
+      setParams({ duration: 10 });
+    }
+  }, [params.model]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const currentModel = modelOptions.find((m) => m.slug === params.model);
   const totalCredits = (currentModel?.creditsPerGen ?? 10) * params.count;
 
@@ -53,15 +65,18 @@ export function ParamBar() {
         <option value="landscape">横屏 16:9</option>
       </select>
 
-      <select
-        value={params.duration}
-        onChange={(e) => setParams({ duration: Number(e.target.value) as 8 | 10 | 15 })}
-        className={selectClass}
-      >
-        <option value={8}>8 秒</option>
-        <option value={10}>10 秒</option>
-        <option value={15}>15 秒</option>
-      </select>
+      {isVeo ? (
+        <span className={`${selectClass} opacity-60 cursor-default`}>8 秒</span>
+      ) : (
+        <select
+          value={params.duration}
+          onChange={(e) => setParams({ duration: Number(e.target.value) as 8 | 10 | 15 })}
+          className={selectClass}
+        >
+          <option value={10}>10 秒</option>
+          <option value={15}>15 秒</option>
+        </select>
+      )}
 
       <select
         value={params.count}
