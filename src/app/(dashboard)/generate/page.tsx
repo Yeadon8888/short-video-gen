@@ -241,20 +241,54 @@ export default function GeneratePage() {
     addLog("正在上传视频...");
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const uploadRes = await fetch("/api/assets/upload", {
+      // Step 1: get direct-upload token from server (small JSON request)
+      const tokenRes = await fetch("/api/assets/upload-token", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: file.name,
+          contentType: file.type,
+        }),
       });
-
-      if (!uploadRes.ok) {
-        setError("UPLOAD_FAILED", `视频上传失败: HTTP ${uploadRes.status}`);
+      if (!tokenRes.ok) {
+        setError("UPLOAD_FAILED", `获取上传凭证失败: HTTP ${tokenRes.status}`);
         return;
       }
+      const { uploadUrl, apiKey } = await tokenRes.json();
 
-      const asset = await uploadRes.json();
+      // Step 2: upload directly to Cloudflare Worker (bypasses Vercel 4.5 MB limit)
+      const directRes = await fetch(uploadUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": file.type || "video/mp4",
+          "X-Upload-Key": apiKey,
+        },
+        body: file,
+      });
+      if (!directRes.ok) {
+        setError("UPLOAD_FAILED", `视频上传失败: HTTP ${directRes.status}`);
+        return;
+      }
+      const r2Result = await directRes.json();
+
+      // Step 3: register asset in DB (small JSON request)
+      const regRes = await fetch("/api/assets/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key: r2Result.key,
+          url: r2Result.url,
+          size: r2Result.size,
+          filename: file.name,
+          contentType: file.type,
+        }),
+      });
+      if (!regRes.ok) {
+        setError("UPLOAD_FAILED", `注册资源失败: HTTP ${regRes.status}`);
+        return;
+      }
+      const asset = await regRes.json();
+
       const sizeMB = (file.size / 1024 / 1024).toFixed(1);
       addLog(`视频已上传 (${sizeMB} MB)，请调整参数后点击发送`);
 

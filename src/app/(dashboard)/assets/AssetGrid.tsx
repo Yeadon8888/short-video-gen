@@ -19,20 +19,51 @@ export function AssetGrid({ initialAssets }: { initialAssets: UserAsset[] }) {
     setError(null);
     try {
       for (const file of files) {
-        const formData = new FormData();
-        formData.append("file", file);
-
-        const res = await fetch("/api/assets/upload", {
+        // Step 1: get upload token
+        const tokenRes = await fetch("/api/assets/upload-token", {
           method: "POST",
-          body: formData,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename: file.name, contentType: file.type }),
         });
+        if (!tokenRes.ok) {
+          setError(`获取上传凭证失败 (HTTP ${tokenRes.status})`);
+          continue;
+        }
+        const { uploadUrl, apiKey } = await tokenRes.json();
 
-        if (res.ok) {
-          const asset = await res.json();
+        // Step 2: upload directly to Cloudflare Worker
+        const directRes = await fetch(uploadUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": file.type || "application/octet-stream",
+            "X-Upload-Key": apiKey,
+          },
+          body: file,
+        });
+        if (!directRes.ok) {
+          setError(`上传失败 (HTTP ${directRes.status})`);
+          continue;
+        }
+        const r2Result = await directRes.json();
+
+        // Step 3: register in DB
+        const regRes = await fetch("/api/assets/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            key: r2Result.key,
+            url: r2Result.url,
+            size: r2Result.size,
+            filename: file.name,
+            contentType: file.type,
+          }),
+        });
+        if (regRes.ok) {
+          const asset = await regRes.json();
           setAssets((prev) => [asset, ...prev]);
         } else {
-          const data = await res.json().catch(() => ({}));
-          setError(data.error || `上传失败 (HTTP ${res.status})`);
+          const data = await regRes.json().catch(() => ({}));
+          setError(data.error || `注册资源失败 (HTTP ${regRes.status})`);
         }
       }
     } catch (err) {
