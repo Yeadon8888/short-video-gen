@@ -24,6 +24,7 @@
   <link rel="stylesheet" href="assets/css/hero.css" />
   <link rel="stylesheet" href="assets/css/demo.css" />
   <link rel="stylesheet" href="assets/css/workflow.css" />
+  <link rel="stylesheet" href="assets/css/showcase.css" />
   <link rel="stylesheet" href="assets/css/usecases.css" />
   <link rel="stylesheet" href="assets/css/pricing.css" />
   <link rel="stylesheet" href="assets/css/footer.css" />
@@ -43,6 +44,7 @@
 
     <ul class="nav__links" role="list">
       <li><a href="#demo" class="nav__link">演示</a></li>
+      <li><a href="#showcase" class="nav__link">案例</a></li>
       <li><a href="#openclaw" class="nav__link">🦞 OpenClaw</a></li>
       <li><a href="#workflow" class="nav__link">工作流</a></li>
       <li><a href="#usecases" class="nav__link">场景</a></li>
@@ -90,6 +92,7 @@
   <button class="nav__mobile-close" aria-label="关闭菜单">✕</button>
   <a href="https://app.yeadon.top" class="nav__link nav__link--try" target="_blank" rel="noopener noreferrer">⚡ 在线体验</a>
   <a href="#demo" class="nav__link">演示</a>
+  <a href="#showcase" class="nav__link">案例</a>
   <a href="#openclaw" class="nav__link">🦞 OpenClaw</a>
   <a href="#workflow" class="nav__link">工作流</a>
   <a href="#usecases" class="nav__link">应用场景</a>
@@ -192,6 +195,108 @@
           <source src="https://oss.yeadon.top/vidclaw/demo.mp4" type="video/mp4" />
         </video>
       </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ════════════════════════════════════════════
+     SHOWCASE GALLERY
+════════════════════════════════════════════ -->
+<section id="showcase" aria-labelledby="showcase-title">
+  <div class="container">
+    <div class="section-header">
+      <div class="section-tag fade-up">成片展示</div>
+      <h2 class="section-title fade-up" data-delay="100" id="showcase-title">
+        一张海报，一条<span class="gradient-text">带货视频</span>
+      </h2>
+      <p class="section-desc fade-up" data-delay="200">
+        输入产品海报 + 一句话主题，VidClaw 自动生成高质量竖屏带货视频。以下均为 AI 真实生成，未经后期。
+      </p>
+    </div>
+
+    <div class="showcase__grid">
+
+      <!-- Card 1: Coffee -->
+      <article class="showcase-card fade-up" data-delay="100">
+        <div class="showcase-card__video-wrap">
+          <span class="showcase-card__tag">☕ 咖啡</span>
+          <video
+            class="showcase-card__video"
+            autoplay loop muted playsinline
+            preload="metadata"
+            poster="showcase/coffee.jpg"
+          >
+            <source src="https://vc-upload.yeadon.top/files/vidclaw-assets/showcase/coffee.mp4" type="video/mp4" />
+          </video>
+        </div>
+        <div class="showcase-card__caption">
+          <div class="showcase-card__title">属于你的清晨治愈时刻</div>
+          <p class="showcase-card__desc">一句话主题 → 阳光咖啡桌 + 产品海报</p>
+          <span class="showcase-card__ai-badge">⚡ VEO 3.1 生成</span>
+        </div>
+      </article>
+
+      <!-- Card 2: Headphones -->
+      <article class="showcase-card fade-up" data-delay="200">
+        <div class="showcase-card__video-wrap">
+          <span class="showcase-card__tag">🎧 耳机</span>
+          <video
+            class="showcase-card__video"
+            autoplay loop muted playsinline
+            preload="metadata"
+            poster="showcase/headphones.jpg"
+          >
+            <source src="https://vc-upload.yeadon.top/files/vidclaw-assets/showcase/headphones.mp4" type="video/mp4" />
+          </video>
+        </div>
+        <div class="showcase-card__caption">
+          <div class="showcase-card__title">一键静音，独享城市浪漫</div>
+          <p class="showcase-card__desc">降噪耳机 × 都市漫步 × 沉浸式体验</p>
+          <span class="showcase-card__ai-badge">⚡ VEO 3.1 生成</span>
+        </div>
+      </article>
+
+      <!-- Card 3: Skincare -->
+      <article class="showcase-card fade-up" data-delay="300">
+        <div class="showcase-card__video-wrap">
+          <span class="showcase-card__tag">✨ 护肤</span>
+          <video
+            class="showcase-card__video"
+            autoplay loop muted playsinline
+            preload="metadata"
+            poster="showcase/skincare.jpg"
+          >
+            <source src="https://vc-upload.yeadon.top/files/vidclaw-assets/showcase/skincare.mp4" type="video/mp4" />
+          </video>
+        </div>
+        <div class="showcase-card__caption">
+          <div class="showcase-card__title">柔光下的精致护肤仪式</div>
+          <p class="showcase-card__desc">高端护肤品 × 温馨浴室 × 精致质感</p>
+          <span class="showcase-card__ai-badge">⚡ VEO 3.1 生成</span>
+        </div>
+      </article>
+
+      <!-- Card 4: Sneakers -->
+      <article class="showcase-card fade-up" data-delay="400" id="showcase-sneakers">
+        <div class="showcase-card__video-wrap">
+          <span class="showcase-card__tag">👟 运动鞋</span>
+          <video
+            class="showcase-card__video"
+            autoplay loop muted playsinline
+            preload="metadata"
+            poster="showcase/sneakers.jpg"
+          >
+            <source src="https://vc-upload.yeadon.top/files/vidclaw-assets/showcase/sneakers.mp4" type="video/mp4" />
+          </video>
+        </div>
+        <div class="showcase-card__caption">
+          <div class="showcase-card__title">动感科技，畅跑城市</div>
+          <p class="showcase-card__desc">潮流运动鞋 × 城市奔跑 × 动感科技</p>
+          <span class="showcase-card__ai-badge">⚡ VEO 3.1 生成</span>
+        </div>
+      </article>
+
     </div>
   </div>
 </section>
@@ -669,6 +774,7 @@
         <h3 class="footer__col-title">产品</h3>
         <ul class="footer__links" role="list">
           <li><a href="#demo" class="footer__link">实战演示</a></li>
+          <li><a href="#showcase" class="footer__link">成片案例</a></li>
           <li><a href="#openclaw" class="footer__link">🦞 OpenClaw 接入</a></li>
           <li><a href="#workflow" class="footer__link">工作流介绍</a></li>
           <li><a href="#usecases" class="footer__link">应用场景</a></li>
