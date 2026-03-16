@@ -19,7 +19,7 @@ export function TopBar({ user, onMenuClick }: TopBarProps) {
   }
 
   return (
-    <header className="flex h-14 items-center justify-between border-b border-[var(--vc-border-subtle)] bg-[var(--vc-bg-root)]/80 px-4 backdrop-blur-sm md:px-6">
+    <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-slate-800 bg-[var(--vc-bg-root)]/80 px-4 backdrop-blur-md md:px-6">
       {/* Left: hamburger (mobile) */}
       <button
         onClick={onMenuClick}
