@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, useInView } from "framer-motion";
-import { useRef, useCallback } from "react";
+import { useRef, useCallback, useState, useEffect } from "react";
 import Image from "next/image";
 
 const R2_BASE = "https://vc-upload.yeadon.top/files/vidclaw-assets/showcase";
@@ -76,6 +76,85 @@ const showcaseItems = [
   },
 ];
 
+/**
+ * Lazy-loaded video card: only loads video when visible in viewport.
+ * Shows poster image first, then plays video once it's buffered enough.
+ * Pauses and unloads video when scrolled out of view to save resources.
+ */
+function VideoCard({
+  item,
+  sizes,
+}: {
+  item: (typeof showcaseItems)[number];
+  sizes: string;
+}) {
+  const cardRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [isVisible, setIsVisible] = useState(false);
+  const [videoReady, setVideoReady] = useState(false);
+
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setIsVisible(entry.isIntersecting);
+      },
+      { rootMargin: "200px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (isVisible) {
+      // Load and play when visible
+      if (video.readyState < 2) {
+        video.load();
+      }
+      video.play().catch(() => {});
+    } else {
+      // Pause and free memory when out of view
+      video.pause();
+    }
+  }, [isVisible]);
+
+  return (
+    <div ref={cardRef} className="relative aspect-[9/16] overflow-hidden">
+      {/* Poster image: always rendered, hidden when video plays */}
+      <Image
+        src={item.img}
+        alt={item.title}
+        fill
+        className={`object-cover transition-opacity duration-500 ${videoReady ? "opacity-0" : "opacity-100"}`}
+        sizes={sizes}
+      />
+      {/* Video: only rendered for items with video url */}
+      {item.video && (
+        <video
+          ref={videoRef}
+          poster={item.img}
+          preload="none"
+          loop
+          muted
+          playsInline
+          onCanPlay={() => setVideoReady(true)}
+          className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ${videoReady ? "opacity-100" : "opacity-0"}`}
+        >
+          <source src={item.video} type="video/mp4" />
+        </video>
+      )}
+      {/* Gradient overlay */}
+      <div className={`absolute inset-0 bg-gradient-to-t ${item.gradient} opacity-40`} />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/20" />
+    </div>
+  );
+}
+
 export function ShowcaseGrid() {
   const ref = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -106,30 +185,8 @@ export function ShowcaseGrid() {
             transition={{ duration: 0.3, delay: i * 0.05, ease: [0.4, 0, 0.2, 1] }}
             className="group relative w-[200px] shrink-0 overflow-hidden rounded-[14px] transition-all duration-200 hover:-translate-y-1 hover:scale-[1.03]"
           >
-            {/* 9:16 card */}
-            <div className="relative aspect-[9/16] overflow-hidden">
-              {item.video ? (
-                <video
-                  src={item.video}
-                  poster={item.img}
-                  autoPlay
-                  loop
-                  muted
-                  playsInline
-                  className="absolute inset-0 h-full w-full object-cover"
-                />
-              ) : (
-                <Image
-                  src={item.img}
-                  alt={item.title}
-                  fill
-                  className="object-cover"
-                  sizes="200px"
-                />
-              )}
-              {/* Gradient overlay */}
-              <div className={`absolute inset-0 bg-gradient-to-t ${item.gradient} opacity-40`} />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/20" />
+            {/* 9:16 card with lazy video */}
+            <VideoCard item={item} sizes="200px" />
 
               {/* Category pill */}
               <span className="absolute left-2.5 top-2.5 rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-medium text-white/80 backdrop-blur-sm">
@@ -148,7 +205,6 @@ export function ShowcaseGrid() {
                 <div className="text-sm font-semibold text-white">{item.title}</div>
                 <div className="mt-0.5 text-[11px] text-white/60">{item.desc}</div>
               </div>
-            </div>
           </motion.div>
         ))}
       </div>
@@ -163,35 +219,13 @@ export function ShowcaseGrid() {
             transition={{ duration: 0.3, delay: i * 0.05 }}
             className="group relative overflow-hidden rounded-xl"
           >
-            <div className="relative aspect-[9/16] overflow-hidden">
-              {item.video ? (
-                <video
-                  src={item.video}
-                  poster={item.img}
-                  autoPlay
-                  loop
-                  muted
-                  playsInline
-                  className="absolute inset-0 h-full w-full object-cover"
-                />
-              ) : (
-                <Image
-                  src={item.img}
-                  alt={item.title}
-                  fill
-                  className="object-cover"
-                  sizes="50vw"
-                />
-              )}
-              <div className={`absolute inset-0 bg-gradient-to-t ${item.gradient} opacity-40`} />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/20" />
-              <span className="absolute left-2 top-2 rounded-full bg-white/15 px-1.5 py-0.5 text-[9px] text-white/80">
-                {item.cat}
-              </span>
-              <div className="absolute bottom-0 left-0 right-0 p-2.5">
-                <div className="text-xs font-semibold text-white">{item.title}</div>
-                <div className="text-[10px] text-white/60">{item.desc}</div>
-              </div>
+            <VideoCard item={item} sizes="50vw" />
+            <span className="absolute left-2 top-2 rounded-full bg-white/15 px-1.5 py-0.5 text-[9px] text-white/80">
+              {item.cat}
+            </span>
+            <div className="absolute bottom-0 left-0 right-0 p-2.5">
+              <div className="text-xs font-semibold text-white">{item.title}</div>
+              <div className="text-[10px] text-white/60">{item.desc}</div>
             </div>
           </motion.div>
         ))}
