@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
         prompt: task.soraPrompt ?? "",
         imageUrls: p?.imageUrls ?? [],
         orientation: (p?.orientation as "portrait" | "landscape") ?? "portrait",
-        duration: (p?.duration === 10 ? 10 : 15) as 10 | 15,
+        duration: (p?.duration === 8 ? 8 : p?.duration === 10 ? 10 : 15) as 8 | 10 | 15,
         count: p?.count ?? 1,
         model: p?.model,
       };

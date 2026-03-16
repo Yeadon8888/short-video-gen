@@ -55,9 +55,10 @@ export function ParamBar() {
 
       <select
         value={params.duration}
-        onChange={(e) => setParams({ duration: Number(e.target.value) as 10 | 15 })}
+        onChange={(e) => setParams({ duration: Number(e.target.value) as 8 | 10 | 15 })}
         className={selectClass}
       >
+        <option value={8}>8 秒</option>
         <option value={10}>10 秒</option>
         <option value={15}>15 秒</option>
       </select>

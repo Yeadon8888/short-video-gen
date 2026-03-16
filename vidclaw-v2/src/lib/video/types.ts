@@ -4,7 +4,7 @@ export interface VideoParams {
   prompt: string;
   imageUrls?: string[];
   orientation: "portrait" | "landscape";
-  duration: 10 | 15;
+  duration: 8 | 10 | 15;
   count: number;
   model?: string;
 }
@@ -58,7 +58,7 @@ export interface GenerateRequest {
   scheduled?: boolean;
   params: {
     orientation: "portrait" | "landscape";
-    duration: 10 | 15;
+    duration: 8 | 10 | 15;
     count: number;
     platform?: "douyin" | "tiktok";
     model?: string;
