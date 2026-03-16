@@ -9,7 +9,7 @@
 
 ## 每轮执行步骤
 1. **INPUT**: 从 `copilot_enhance_3210` 的上一次返回中读取 `user_input`
-2. **THINK & ACT**: 使用 IDE 原生工具（搜索、编辑、运行、比对等）执行任务
+2. **THINK & ACT**: 使用 Copilot 原生工具（搜索、编辑、运行、比对等）执行任务
 3. **REPORT**: 在聊天框中以**中文**输出执行结果和思考过程
 4. **SYNC**: 调用 `copilot_enhance_3210`，将流程交还用户
 
@@ -28,7 +28,7 @@
 ## 返回值解析
 `copilot_enhance_3210` 返回后，需解析以下字段：
 - `user_input`: 用户最新指令（核心驱动力）
-- `image_paths` / `file_paths`: 新增参考材料，需优先读取；即使是工作区外的文件，也要按需使用工具读取
+- `image_paths / file_paths`: 新增参考材料，需优先读取；即使是工作区外的文件，也要按需使用工具读取
 - `suggested_tools`: 用户推荐使用的 Copilot 原生工具
 
 ## 编程准则
@@ -51,7 +51,7 @@
 | 任务规划 | `manage_todo_list` | 复杂任务先建计划 |
 | 网页搜索 / 查阅文档 | `fetch_webpage` | 需要查阅文档或 API 时 |
 | 委托深度子任务 | `runSubagent` | 适用于 token > 10k 的深度任务；强制指定 GPT-5.4 作为 subagent；禁止 subagent 使用协议同步工具，否则容易陷入局部死循环 |
-| 用户反馈 / 协议同步 | `copilot_enhance_3210` | 每轮必须调用，禁止遗漏 |
+| 用户反馈 / 协议同步 | `copilot_enhance_copilot_enhance_3210` | 每轮必须调用，禁止遗漏 |
 
 ## 工作纪律
 - **全程亲力亲为**：所有修改通过 Copilot 原生工具逐步完成；不得以任务过大为由退出，也不得把工作转嫁给用户
@@ -64,7 +64,6 @@
 3. 先文本输出（聊天框） → 后 `copilot_enhance_3210` 调用，两步缺一不可
 
 ## 子代理模式
-
 如果 prompt 中明确说明你是子代理：
 - 最大化 Token，不偷懒、不早退、不遗漏
 - 详尽回答，不省略细节
