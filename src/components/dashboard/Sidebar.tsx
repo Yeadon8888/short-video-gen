@@ -85,21 +85,24 @@ export function Sidebar({ user, mobileOpen, onMobileClose }: SidebarProps) {
         })}
       </nav>
 
-      {/* Credits badge + Storage */}
-      <div className="mt-auto border-t border-[var(--vc-border-subtle)] px-4 py-4 space-y-4">
-        {/* Storage progress */}
-        <div>
-          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">存储</span>
-          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
-            <div className="h-full w-3/4 rounded-full bg-[var(--vc-accent)]" />
-          </div>
-        </div>
-
-        {/* Credits */}
+      {/* Credits progress */}
+      <div className="mt-auto border-t border-[var(--vc-border-subtle)] px-4 py-4 space-y-3">
         <div className="flex items-center justify-between text-sm">
-          <span className="text-[var(--vc-text-muted)]">积分余额</span>
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">积分余额</span>
           <span className="font-semibold tabular-nums text-white">{user.credits}</span>
         </div>
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-[var(--vc-accent)] to-purple-400 transition-all duration-500"
+            style={{ width: `${Math.min(100, (user.credits / 500) * 100)}%` }}
+          />
+        </div>
+        <Link
+          href="/pricing"
+          className="block text-center text-xs text-[var(--vc-accent)] transition-colors hover:text-[var(--vc-accent)]/80"
+        >
+          充值积分 →
+        </Link>
       </div>
     </>
   );

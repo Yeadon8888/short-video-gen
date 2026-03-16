@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Download, Clock, CheckCircle, XCircle, Loader2, AlertTriangle, CalendarClock } from "lucide-react";
 import type { Task } from "@/lib/db/schema";
 
-const EXPIRY_DAYS = 7;
+const EXPIRY_DAYS = 3;
 const POLL_INTERVAL = 15_000; // 15 seconds
 const ACTIVE_STATUSES = ["pending", "analyzing", "generating", "polling"];
 
@@ -76,7 +76,7 @@ export function TaskList({ initialTasks }: { initialTasks: Task[] }) {
       <div className="flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-2.5">
         <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
         <p className="text-sm text-amber-300/90">
-          生成的视频将在 <span className="font-medium text-amber-200">7 天</span> 后自动清除，请及时下载保存
+          生成的视频将在 <span className="font-medium text-amber-200">3 天</span> 后自动清除，请及时下载保存
         </p>
       </div>
 
