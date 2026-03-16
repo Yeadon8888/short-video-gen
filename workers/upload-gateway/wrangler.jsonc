@@ -6,8 +6,11 @@
   "workers_dev": true,
   "vars": {
     "UPLOAD_PREFIX": "vidclaw-assets",
-    "MAX_UPLOAD_BYTES": "15728640"
+    "MAX_UPLOAD_BYTES": "104857600"
   },
+  "routes": [
+    { "pattern": "vc-upload.yeadon.top", "custom_domain": true }
+  ],
   "r2_buckets": [
     {
       "binding": "ASSETS_BUCKET",
