@@ -5,6 +5,7 @@ import { AnimatedCounter } from "@/components/landing/AnimatedCounter";
 import { FeatureCards } from "@/components/landing/FeatureTabs";
 import { ShowcaseGrid } from "@/components/landing/ShowcaseGrid";
 import { ScrollReveal } from "@/components/landing/ScrollReveal";
+import { HeroDemoAnimation } from "@/components/landing/HeroDemoAnimation";
 
 export default async function LandingPage() {
   const supabase = await createClient();
@@ -117,31 +118,30 @@ export default async function LandingPage() {
             </ScrollReveal>
           </div>
 
-          {/* Right — Search-style input preview */}
+          {/* Right — Interactive demo animation */}
           <ScrollReveal delay={0.3}>
-            <div className="rounded-xl border border-[var(--vc-accent)]/15 bg-[var(--vc-bg-surface)]/80 p-2 shadow-2xl shadow-[var(--vc-accent)]/5 backdrop-blur-sm">
-              <div className="flex items-start gap-4 rounded-lg p-4">
-                <Zap className="mt-1 h-7 w-7 shrink-0 text-[var(--vc-accent)]" />
-                <div className="flex-1">
-                  <div className="text-xl text-slate-500 md:text-2xl">
-                    粘贴抖音/TikTok 链接或输入创意主题...
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center justify-between border-t border-[var(--vc-border)]/50 p-4">
-                <div className="flex gap-2">
-                  {["9:16", "15s", "VEO 3.1"].map((tag) => (
-                    <span key={tag} className="rounded-full border border-[var(--vc-border)] bg-[var(--vc-bg-root)] px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-                <Link href={ctaHref} className="vc-glow-btn px-8 py-3 text-sm">
-                  生成
-                </Link>
-              </div>
+            <HeroDemoAnimation />
+          </ScrollReveal>
+        </div>
+      </section>
+
+      {/* ═══════════════════ 案例展示（紧跟 Hero） ═══════════════════ */}
+      <section id="showcase" className="border-t border-[var(--vc-border)] px-6 py-24 lg:px-12">
+        <div className="mx-auto max-w-[1280px]">
+          <ScrollReveal>
+            <div className="text-center">
+              <h2 className="font-heading text-3xl font-bold lg:text-4xl">
+                AI 生成的产品广告
+              </h2>
+              <p className="mt-3 text-lg text-slate-400">
+                不同品类、不同风格
+              </p>
             </div>
           </ScrollReveal>
+
+          <div className="mt-12">
+            <ShowcaseGrid />
+          </div>
         </div>
       </section>
 
@@ -184,26 +184,6 @@ export default async function LandingPage() {
 
           <div className="mt-12">
             <FeatureCards />
-          </div>
-        </div>
-      </section>
-
-      {/* ═══════════════════ 案例展示 ═══════════════════ */}
-      <section id="showcase" className="border-t border-[var(--vc-border)] px-6 py-24 lg:px-12">
-        <div className="mx-auto max-w-[1280px]">
-          <ScrollReveal>
-            <div className="text-center">
-              <h2 className="font-heading text-3xl font-bold lg:text-4xl">
-                AI 生成的产品广告
-              </h2>
-              <p className="mt-3 text-lg text-slate-400">
-                不同品类、不同风格
-              </p>
-            </div>
-          </ScrollReveal>
-
-          <div className="mt-12">
-            <ShowcaseGrid />
           </div>
         </div>
       </section>
