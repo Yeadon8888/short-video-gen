@@ -84,25 +84,38 @@ export async function GET(req: NextRequest) {
     }
 
     if (hasSuccess) {
-      // Some videos succeeded — mark done, no refund
+      // Some videos succeeded — mark done, no refund.
+      // Atomic: only update if still in active state (prevents double-processing).
       await db
         .update(tasks)
         .set({ status: "done", resultUrls: successUrls, completedAt: new Date() })
-        .where(eq(tasks.id, task.id));
+        .where(
+          and(
+            eq(tasks.id, task.id),
+            inArray(tasks.status, ["generating", "polling", "analyzing"]),
+          ),
+        );
       resolved++;
     } else {
-      // All failed or still stuck — mark failed and refund credits
-      await db
+      // All failed or still stuck — mark failed and refund credits.
+      // Atomic: only update if still active (prevents double refund).
+      const [updated] = await db
         .update(tasks)
         .set({
           status: "failed",
           errorMessage: `超时未完成（>${TIMEOUT_MINUTES}分钟），积分已自动退还`,
           completedAt: new Date(),
         })
-        .where(eq(tasks.id, task.id));
+        .where(
+          and(
+            eq(tasks.id, task.id),
+            inArray(tasks.status, ["generating", "polling", "analyzing"]),
+          ),
+        )
+        .returning({ id: tasks.id });
 
-      // Refund credits
-      if (task.creditsCost > 0) {
+      // Only refund if we actually transitioned the task
+      if (updated && task.creditsCost > 0) {
         await db
           .update(users)
           .set({ credits: sql`${users.credits} + ${task.creditsCost}` })

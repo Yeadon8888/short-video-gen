@@ -1,9 +1,12 @@
 "use client";
 
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Download, Clock, CheckCircle, XCircle, Loader2, AlertTriangle, CalendarClock } from "lucide-react";
 import type { Task } from "@/lib/db/schema";
 
 const EXPIRY_DAYS = 7;
+const POLL_INTERVAL = 15_000; // 15 seconds
+const ACTIVE_STATUSES = ["pending", "analyzing", "generating", "polling"];
 
 const statusConfig: Record<string, { icon: React.ElementType; color: string; label: string }> = {
   pending: { icon: Clock, color: "text-zinc-400", label: "等待中" },
@@ -23,7 +26,43 @@ function daysUntilExpiry(createdAt: string | Date): number {
 }
 
 export function TaskList({ initialTasks }: { initialTasks: Task[] }) {
-  if (initialTasks.length === 0) {
+  const [taskList, setTaskList] = useState<Task[]>(initialTasks);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Refresh active tasks by fetching updated task list from server
+  const refreshActiveTasks = useCallback(async () => {
+    const hasActive = taskList.some((t) => ACTIVE_STATUSES.includes(t.status));
+    if (!hasActive) return;
+
+    try {
+      const res = await fetch("/api/tasks/refresh");
+      if (!res.ok) return;
+      const data = await res.json();
+      setTaskList(data.tasks);
+    } catch {
+      // silently ignore network errors
+    }
+  }, [taskList]);
+
+  useEffect(() => {
+    const hasActive = taskList.some((t) => ACTIVE_STATUSES.includes(t.status));
+    if (hasActive && !timerRef.current) {
+      // Start polling
+      timerRef.current = setInterval(refreshActiveTasks, POLL_INTERVAL);
+    } else if (!hasActive && timerRef.current) {
+      // Stop polling once all tasks are terminal
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [taskList, refreshActiveTasks]);
+
+  if (taskList.length === 0) {
     return (
       <div className="vc-card p-8 text-center text-sm text-[var(--vc-text-muted)]">
         暂无任务记录
@@ -41,7 +80,7 @@ export function TaskList({ initialTasks }: { initialTasks: Task[] }) {
         </p>
       </div>
 
-      {initialTasks.map((task) => {
+      {taskList.map((task) => {
         const cfg = statusConfig[task.status] ?? statusConfig.pending;
         const Icon = cfg.icon;
         const resultUrls = (task.resultUrls as string[]) ?? [];

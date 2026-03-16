@@ -114,7 +114,9 @@ export async function GET(req: NextRequest) {
       const refundAmount = failedCount * perItemCost;
       const actualCost = parentTask ? parentTask.creditsCost - refundAmount : 0;
 
-      await db
+      // Atomically update task status — only if still in an active state.
+      // This prevents double-processing by concurrent status polls or cron.
+      const [updated] = await db
         .update(tasks)
         .set({
           status: hasAnySuccess ? "done" : "failed",
@@ -127,10 +129,16 @@ export async function GET(req: NextRequest) {
               ? { errorMessage: `${successCount}/${totalCount} 成功，失败部分积分已退还` }
               : {}),
         })
-        .where(eq(tasks.id, firstItem.taskId));
+        .where(
+          and(
+            eq(tasks.id, firstItem.taskId),
+            inArray(tasks.status, ["pending", "analyzing", "generating", "polling"]),
+          ),
+        )
+        .returning({ id: tasks.id });
 
-      // Refund for failed items (partial or full)
-      if (refundAmount > 0 && parentTask) {
+      // Only refund if we actually transitioned the task (prevents double refund)
+      if (updated && refundAmount > 0 && parentTask) {
         await db
           .update(users)
           .set({ credits: sql`${users.credits} + ${refundAmount}` })

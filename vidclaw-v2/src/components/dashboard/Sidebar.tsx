@@ -9,6 +9,7 @@ import {
   ImageIcon,
   Settings,
   Shield,
+  Coins,
   X,
 } from "lucide-react";
 import type { User } from "@/lib/db/schema";
@@ -23,6 +24,7 @@ const userLinks = [
   { href: "/generate", label: "生成视频", icon: Clapperboard },
   { href: "/tasks", label: "任务历史", icon: History },
   { href: "/assets", label: "参考图片", icon: ImageIcon },
+  { href: "/pricing", label: "积分充值", icon: Coins },
   { href: "/settings", label: "设置", icon: Settings },
 ];
 

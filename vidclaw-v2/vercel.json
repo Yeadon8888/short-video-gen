@@ -22,7 +22,7 @@
     },
     {
       "path": "/api/cron/timeout",
-      "schedule": "0 12 * * *"
+      "schedule": "*/15 * * * *"
     }
   ]
 }
