@@ -17,7 +17,7 @@ const FALLBACK_MODELS: ModelOption[] = [
 ];
 
 const selectClass =
-  "rounded-[var(--vc-radius-md)] bg-[var(--vc-bg-root)] border border-[var(--vc-border)] px-2.5 py-1.5 text-xs text-white outline-none cursor-pointer transition-colors duration-150 hover:border-zinc-600 focus:border-[var(--vc-accent)] sm:text-sm sm:px-3";
+  "rounded-full bg-[var(--vc-bg-root)] border border-[var(--vc-border)] px-3 py-2 text-xs text-white outline-none cursor-pointer transition-all duration-150 hover:border-[var(--vc-accent)]/50 focus:border-[var(--vc-accent)] sm:text-sm sm:px-4";
 
 export function ParamBar() {
   const params = useGenerateStore((s) => s.params);

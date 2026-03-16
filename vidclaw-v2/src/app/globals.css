@@ -173,6 +173,50 @@ body {
   animation: vc-shimmer 2s ease-in-out infinite;
 }
 
+/* ─────── Mesh gradient backgrounds ─────── */
+
+.vc-mesh-gradient {
+  background-color: #101f22;
+  background-image:
+    radial-gradient(at 0% 0%, rgba(13, 204, 242, 0.15) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(13, 204, 242, 0.1) 0px, transparent 50%);
+}
+
+.vc-gradient-border {
+  position: relative;
+}
+.vc-gradient-border::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(to bottom right, rgba(13, 204, 242, 0.4), transparent);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* ─────── Glow button (landing) ─────── */
+
+.vc-glow-btn {
+  background: var(--vc-accent);
+  color: var(--vc-bg-root);
+  font-weight: 700;
+  border-radius: 9999px;
+  box-shadow: 0 0 20px rgba(13, 204, 242, 0.3);
+  transition: all var(--vc-duration-fast) var(--vc-ease);
+}
+.vc-glow-btn:hover {
+  transform: scale(1.05);
+  filter: brightness(1.1);
+}
+.vc-glow-btn:active {
+  transform: scale(0.95);
+}
+
 /* ─────── Landing page tokens ─────── */
 
 .font-heading { font-family: var(--font-jakarta), var(--font-inter), system-ui, sans-serif; }

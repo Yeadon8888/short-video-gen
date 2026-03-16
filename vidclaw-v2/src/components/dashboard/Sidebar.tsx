@@ -70,10 +70,10 @@ export function Sidebar({ user, mobileOpen, onMobileClose }: SidebarProps) {
             <Link
               key={link.href}
               href={link.href}
-              className={`group flex items-center gap-3 rounded-[var(--vc-radius-md)] px-3 py-2.5 text-sm transition-all duration-150 ${
+              className={`group flex items-center gap-3 rounded-[var(--vc-radius-md)] px-4 py-3 text-sm transition-all duration-150 ${
                 isActive
-                  ? "bg-[var(--vc-accent)]/12 text-[var(--vc-accent)] shadow-[inset_0_0_0_1px_rgba(13,204,242,0.15)]"
-                  : "text-[var(--vc-text-secondary)] hover:bg-white/[0.04] hover:text-white"
+                  ? "bg-[var(--vc-accent)]/10 font-medium text-[var(--vc-accent)]"
+                  : "text-slate-400 hover:bg-slate-800 hover:text-white"
               }`}
             >
               <link.icon className={`h-4 w-4 transition-transform duration-150 ${isActive ? "" : "group-hover:scale-110"}`} />
@@ -83,8 +83,17 @@ export function Sidebar({ user, mobileOpen, onMobileClose }: SidebarProps) {
         })}
       </nav>
 
-      {/* Credits badge */}
-      <div className="border-t border-[var(--vc-border-subtle)] px-4 py-4">
+      {/* Credits badge + Storage */}
+      <div className="mt-auto border-t border-[var(--vc-border-subtle)] px-4 py-4 space-y-4">
+        {/* Storage progress */}
+        <div>
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">存储</span>
+          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
+            <div className="h-full w-3/4 rounded-full bg-[var(--vc-accent)]" />
+          </div>
+        </div>
+
+        {/* Credits */}
         <div className="flex items-center justify-between text-sm">
           <span className="text-[var(--vc-text-muted)]">积分余额</span>
           <span className="font-semibold tabular-nums text-white">{user.credits}</span>
@@ -96,7 +105,7 @@ export function Sidebar({ user, mobileOpen, onMobileClose }: SidebarProps) {
   return (
     <>
       {/* Desktop sidebar — always visible */}
-      <aside className="vc-glass hidden w-56 flex-col rounded-none border-0 border-r border-[var(--vc-border-subtle)] md:flex">
+      <aside className="vc-glass hidden w-64 flex-col rounded-none border-0 border-r border-slate-800 md:flex">
         {sidebarContent}
       </aside>
 

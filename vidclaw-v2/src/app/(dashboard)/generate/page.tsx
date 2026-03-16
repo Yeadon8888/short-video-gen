@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { Send, Upload, X, Film } from "lucide-react";
+import { Send, Upload, X, Film, Zap } from "lucide-react";
 import { useGenerateStore, type PollResult } from "@/stores/generate";
 import { ParamBar } from "@/components/generate/ParamBar";
 import { ProcessLog } from "@/components/generate/ProcessLog";
@@ -273,28 +273,28 @@ export default function GeneratePage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 sm:space-y-8">
+    <div className="mx-auto max-w-4xl space-y-8">
       {/* ═══ Title ═══ */}
-      <div className="pt-4 text-center sm:pt-8">
-        <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
-          生成{" "}
-          <span className="vc-gradient-text">AI</span>
-          <sup className="vc-gradient-text text-xs align-super">+</sup>{" "}
-          带货短视频
+      <div className="pt-4 text-center sm:pt-8 space-y-4">
+        <h1 className="text-4xl font-black tracking-tight md:text-6xl">
+          <span className="bg-gradient-to-r from-white via-slate-200 to-[var(--vc-accent)] bg-clip-text text-transparent">
+            AI 视频生成
+          </span>
         </h1>
+        <p className="text-lg text-slate-400">粘贴链接、上传视频或描述主题，AI 一键出片</p>
       </div>
 
       {/* ═══ Main Input Card ═══ */}
-      <div className="vc-card overflow-hidden border-[var(--vc-accent)]/20 p-4 shadow-[var(--vc-shadow-glow)] sm:p-5">
-        {/* Textarea */}
-        <div className="flex items-end gap-2">
+      <div className="rounded-xl border border-[var(--vc-border)] bg-[var(--vc-bg-surface)] p-2 shadow-2xl">
+        {/* Input area */}
+        <div className="flex items-start gap-4 p-4" style={{ minHeight: 160 }}>
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={isLoading}
-            className="shrink-0 rounded-[var(--vc-radius-md)] p-2 text-[var(--vc-text-muted)] transition-colors duration-150 hover:bg-white/[0.04] hover:text-white disabled:opacity-40"
+            className="mt-2 shrink-0 text-[var(--vc-accent)] transition-all duration-150 hover:scale-110 disabled:opacity-40"
             title="上传视频进行二创"
           >
-            <Upload className="h-5 w-5" />
+            <Upload className="h-7 w-7" />
           </button>
           <input
             ref={fileInputRef}
@@ -306,16 +306,16 @@ export default function GeneratePage() {
 
           <div className="flex-1">
             {pendingVideo && (
-              <div className="mb-1.5 flex items-center gap-2 rounded-[var(--vc-radius-sm)] bg-[var(--vc-accent)]/10 px-2.5 py-1.5">
-                <Film className="h-3.5 w-3.5 shrink-0 text-[var(--vc-accent)]" />
-                <span className="truncate text-xs text-[var(--vc-accent)]">
+              <div className="mb-2 flex items-center gap-2 rounded-full bg-[var(--vc-accent)]/10 px-3 py-1.5">
+                <Film className="h-4 w-4 shrink-0 text-[var(--vc-accent)]" />
+                <span className="truncate text-sm text-[var(--vc-accent)]">
                   {pendingVideo.name} ({pendingVideo.sizeMB} MB)
                 </span>
                 <button
                   onClick={() => setPendingVideo(null)}
-                  className="ml-auto shrink-0 rounded p-0.5 text-[var(--vc-accent)]/60 transition-colors hover:bg-[var(--vc-accent)]/20 hover:text-[var(--vc-accent)]"
+                  className="ml-auto shrink-0 rounded-full p-1 text-[var(--vc-accent)]/60 transition-colors hover:bg-[var(--vc-accent)]/20 hover:text-[var(--vc-accent)]"
                 >
-                  <X className="h-3 w-3" />
+                  <X className="h-3.5 w-3.5" />
                 </button>
               </div>
             )}
@@ -324,32 +324,34 @@ export default function GeneratePage() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={pendingVideo ? "输入修改提示（可选），然后点击发送..." : "粘贴抖音/TikTok 链接，或输入创意主题..."}
-              rows={2}
+              rows={3}
               disabled={isLoading}
-              className="max-h-32 w-full resize-none bg-transparent py-2 text-sm leading-relaxed text-white placeholder-[var(--vc-text-dim)] outline-none"
+              className="h-32 w-full resize-none bg-transparent text-xl text-slate-100 placeholder-slate-600 outline-none md:text-2xl"
             />
           </div>
+        </div>
 
+        {/* Params bar + Generate button */}
+        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[var(--vc-border)]/50 p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <ParamBar />
+          </div>
           <button
             onClick={handleSend}
             disabled={(!input.trim() && !pendingVideo) || isLoading}
-            className="vc-gradient-btn shrink-0 rounded-[var(--vc-radius-md)] px-4 py-2 text-sm font-medium"
+            className="vc-glow-btn flex items-center gap-2 px-8 py-3 text-sm"
           >
-            <Send className="h-4 w-4" />
+            <Zap className="h-4 w-4" />
+            生成
           </button>
-        </div>
-
-        {/* Inline Params (inside the card) */}
-        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[var(--vc-border)] pt-3">
-          <ParamBar />
         </div>
       </div>
 
       {/* ═══ Quick Examples ═══ */}
       {stage === "IDLE" && !errorMessage && (
-        <div className="space-y-3">
-          <p className="text-center text-xs text-[var(--vc-text-dim)]">使用示例</p>
-          <div className="grid gap-2 sm:grid-cols-3">
+        <div className="space-y-6">
+          {/* Example cards */}
+          <div className="grid gap-3 sm:grid-cols-3">
             {[
               { title: "🔗 链接二创", desc: "粘贴抖音/TikTok 视频链接" },
               { title: "📁 上传视频", desc: "上传本地视频进行 AI 二创" },
@@ -357,35 +359,33 @@ export default function GeneratePage() {
             ].map(({ title, desc }) => (
               <button
                 key={title}
-                className="vc-card group flex items-center gap-3 p-3 text-left transition-all duration-200 hover:border-[var(--vc-accent)]/30 hover:shadow-[var(--vc-shadow-md)] sm:flex-col sm:items-start sm:gap-1"
+                className="group rounded-xl border border-white/5 bg-[var(--vc-bg-surface)] p-5 text-left transition-all duration-300 hover:border-[var(--vc-accent)]/30"
                 onClick={() => {
                   if (title.includes("上传")) {
                     fileInputRef.current?.click();
                   }
                 }}
               >
-                <div className="text-sm font-medium text-white">{title}</div>
-                <div className="text-xs text-[var(--vc-text-muted)]">{desc}</div>
+                <div className="text-sm font-bold text-white">{title}</div>
+                <div className="mt-1 text-sm text-slate-400">{desc}</div>
               </button>
             ))}
           </div>
 
-          {/* Guide steps — collapsed on mobile */}
-          <div className="grid gap-2 pt-2 sm:grid-cols-3">
+          {/* 3-step flow */}
+          <div className="grid gap-8 border-t border-[var(--vc-border)] pt-12 pb-8 md:grid-cols-3">
             {[
-              { step: 1, title: "上传参考图", desc: "在「参考图片」页面上传产品图" },
-              { step: 2, title: "输入主题或链接", desc: "输入创意主题或粘贴视频链接" },
-              { step: 3, title: "等待生成", desc: "AI 分析 → 提交任务 → 自动回片" },
-            ].map(({ step, title, desc }) => (
-              <div
-                key={step}
-                className="flex items-start gap-3 rounded-[var(--vc-radius-md)] px-3 py-2 sm:flex-col sm:gap-1"
-              >
-                <span className="vc-gradient-text shrink-0 text-xs font-bold">0{step}</span>
-                <div>
-                  <div className="text-xs font-medium text-zinc-300">{title}</div>
-                  <div className="text-xs text-[var(--vc-text-dim)]">{desc}</div>
+              { step: "01", title: "链接 / 主题", desc: "粘贴视频链接或输入产品主题，开始创作" },
+              { step: "02", title: "AI 分析", desc: "Gemini 深度理解画面内容，生成英文脚本", active: false },
+              { step: "03", title: "视频出片", desc: "VEO 3.1 / Sora 生成视频，自动配套文案", active: false },
+            ].map(({ step, title, desc, active }, i) => (
+              <div key={step} className={i > 0 ? "opacity-50" : ""}>
+                <div className="flex items-center gap-3">
+                  <span className="text-3xl font-black text-[var(--vc-accent)]/30">{step}</span>
+                  <div className="h-px flex-1 bg-[var(--vc-border)]" />
                 </div>
+                <h3 className="mt-4 font-bold text-slate-200">{title}</h3>
+                <p className="mt-1 text-sm text-slate-500">{desc}</p>
               </div>
             ))}
           </div>
@@ -394,11 +394,11 @@ export default function GeneratePage() {
 
       {/* ═══ Error ═══ */}
       {errorMessage && (
-        <div className="vc-animate-in rounded-[var(--vc-radius-lg)] border border-red-500/25 bg-red-500/5 px-4 py-3 text-sm text-red-400">
+        <div className="vc-animate-in rounded-xl border border-red-500/25 bg-red-500/5 px-4 py-3 text-sm text-red-400">
           {errorMessage}
           <button
             onClick={reset}
-            className="ml-3 rounded-[var(--vc-radius-sm)] bg-red-500/10 px-2 py-0.5 text-xs transition-colors hover:bg-red-500/20"
+            className="ml-3 rounded-full bg-red-500/10 px-3 py-1 text-xs transition-colors hover:bg-red-500/20"
           >
             清除
           </button>
