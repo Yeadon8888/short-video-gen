@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "robots-override",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-01",
+  "routes": [
+    {
+      "pattern": "video.yeadon.top/robots.txt",
+      "zone_name": "yeadon.top"
+    }
+  ]
+}
