@@ -48,7 +48,7 @@ const nextConfig: NextConfig = {
             "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data: blob: https://*.r2.dev https://*.workers.dev https://*.bltcy.ai https://vc-upload.yeadon.top",
-            "media-src 'self' blob: https://*.r2.dev https://*.workers.dev https://*.bltcy.ai https://vc-upload.yeadon.top",
+            "media-src 'self' blob: https:",
             "font-src 'self' data:",
             "connect-src 'self' https://*.supabase.co https://*.r2.dev https://*.workers.dev https://*.bltcy.ai https://vc-upload.yeadon.top",
             "frame-ancestors 'none'",
