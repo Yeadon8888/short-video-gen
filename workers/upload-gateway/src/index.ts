@@ -4,18 +4,40 @@ interface Env {
   UPLOAD_PREFIX?: string;
   PUBLIC_BASE_URL?: string;
   MAX_UPLOAD_BYTES?: string;
+  /** Comma-separated allowed origins, e.g. "https://vidclaw.com,https://app.vidclaw.com" */
+  ALLOWED_ORIGINS?: string;
 }
 
-const corsHeaders = {
-  "access-control-allow-origin": "*",
-  "access-control-allow-methods": "GET,HEAD,POST,DELETE,OPTIONS",
-  "access-control-allow-headers": "Content-Type,X-Upload-Key",
-  "access-control-max-age": "86400",
-};
+function getAllowedOrigins(env: Env): Set<string> {
+  const raw = env.ALLOWED_ORIGINS?.trim();
+  if (!raw) return new Set(); // empty = restrict to no browser origin (API-key only)
+  return new Set(raw.split(",").map((s) => s.trim()).filter(Boolean));
+}
+
+function getCorsHeaders(request: Request, env: Env): Record<string, string> {
+  const origin = request.headers.get("origin") ?? "";
+  const allowed = getAllowedOrigins(env);
+
+  // If ALLOWED_ORIGINS is configured and origin matches, reflect it
+  // If ALLOWED_ORIGINS is not set, don't include Access-Control-Allow-Origin (server-to-server only)
+  const headers: Record<string, string> = {
+    "access-control-allow-methods": "GET,HEAD,POST,DELETE,OPTIONS",
+    "access-control-allow-headers": "Content-Type,X-Upload-Key",
+    "access-control-max-age": "86400",
+  };
+
+  if (allowed.size > 0 && allowed.has(origin)) {
+    headers["access-control-allow-origin"] = origin;
+    headers["vary"] = "Origin";
+  }
+
+  return headers;
+}
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    const corsHeaders = getCorsHeaders(request, env);
 
     if (request.method === "OPTIONS") {
       return new Response(null, { headers: corsHeaders });
@@ -40,27 +62,27 @@ export default {
     }
 
     if (request.method === "POST" && url.pathname === "/upload") {
-      return handleUpload(request, env, url);
+      return handleUpload(request, env, url, corsHeaders);
     }
 
     if (request.method === "GET" && url.pathname === "/list") {
-      return handleList(request, env, url);
+      return handleList(request, env, url, corsHeaders);
     }
 
     if ((request.method === "GET" || request.method === "HEAD") && url.pathname.startsWith("/files/")) {
-      return handleGetFile(request, env, url);
+      return handleGetFile(request, env, url, corsHeaders);
     }
 
     if (request.method === "DELETE" && url.pathname.startsWith("/files/")) {
-      return handleDelete(request, env, url);
+      return handleDelete(request, env, url, corsHeaders);
     }
 
-    return json({ error: "Not found" }, 404);
+    return json({ error: "Not found" }, 404, corsHeaders);
   },
 };
 
-async function handleUpload(request: Request, env: Env, url: URL): Promise<Response> {
-  const authError = authorize(request, env);
+async function handleUpload(request: Request, env: Env, url: URL, corsHeaders: Record<string, string>): Promise<Response> {
+  const authError = authorize(request, env, corsHeaders);
   if (authError) {
     return authError;
   }
@@ -68,16 +90,16 @@ async function handleUpload(request: Request, env: Env, url: URL): Promise<Respo
   const contentLength = Number.parseInt(request.headers.get("content-length") ?? "0", 10);
   const maxUploadBytes = Number.parseInt(env.MAX_UPLOAD_BYTES ?? "15728640", 10);
   if (Number.isFinite(contentLength) && contentLength > maxUploadBytes) {
-    return json({ error: "Payload too large", maxUploadBytes }, 413);
+    return json({ error: "Payload too large", maxUploadBytes }, 413, corsHeaders);
   }
 
   const contentType = request.headers.get("content-type") || "application/octet-stream";
   const key = normalizeKey(url.searchParams.get("key"), env.UPLOAD_PREFIX, contentType);
   if (!key) {
-    return json({ error: "Invalid object key" }, 400);
+    return json({ error: "Invalid object key" }, 400, corsHeaders);
   }
   if (!request.body) {
-    return json({ error: "Missing request body" }, 400);
+    return json({ error: "Missing request body" }, 400, corsHeaders);
   }
 
   const uploadedAt = new Date().toISOString();
@@ -102,18 +124,19 @@ async function handleUpload(request: Request, env: Env, url: URL): Promise<Respo
       contentType,
     },
     200,
+    corsHeaders,
   );
 }
 
-async function handleList(request: Request, env: Env, url: URL): Promise<Response> {
-  const authError = authorize(request, env);
+async function handleList(request: Request, env: Env, url: URL, corsHeaders: Record<string, string>): Promise<Response> {
+  const authError = authorize(request, env, corsHeaders);
   if (authError) {
     return authError;
   }
 
   const prefix = normalizePrefix(url.searchParams.get("prefix"), env.UPLOAD_PREFIX);
   if (!prefix) {
-    return json({ error: "Invalid prefix" }, 400);
+    return json({ error: "Invalid prefix" }, 400, corsHeaders);
   }
 
   const listed = await env.ASSETS_BUCKET.list({ prefix });
@@ -126,24 +149,33 @@ async function handleList(request: Request, env: Env, url: URL): Promise<Respons
     }))
     .sort((a, b) => (a.uploadedAt < b.uploadedAt ? 1 : -1));
 
-  return json({ assets }, 200);
+  return json({ assets }, 200, corsHeaders);
 }
 
-async function handleGetFile(request: Request, env: Env, url: URL): Promise<Response> {
-  const key = url.pathname.replace(/^\/files\//, "");
-  if (!key) {
-    return json({ error: "Missing key" }, 400);
+async function handleGetFile(request: Request, env: Env, url: URL, corsHeaders: Record<string, string>): Promise<Response> {
+  const key = decodeURIComponent(url.pathname.replace(/^\/files\//, ""));
+  if (!key || key.includes("..") || key.startsWith("/")) {
+    return json({ error: "Invalid key" }, 400, corsHeaders);
+  }
+
+  // Restrict access to files under the configured prefix only
+  const prefix = (env.UPLOAD_PREFIX ?? "vidclaw-assets").replace(/^\/+|\/+$/g, "");
+  if (!key.startsWith(prefix + "/")) {
+    return json({ error: "Access denied" }, 403, corsHeaders);
   }
 
   const object = await env.ASSETS_BUCKET.get(key);
   if (!object) {
-    return json({ error: "File not found" }, 404);
+    return json({ error: "File not found" }, 404, corsHeaders);
   }
 
   const headers = new Headers(corsHeaders);
   object.writeHttpMetadata(headers);
   headers.set("etag", object.httpEtag);
   headers.set("cache-control", "public, max-age=31536000, immutable");
+  // Prevent browsers from executing uploaded files (XSS via SVG/HTML)
+  headers.set("content-disposition", "inline");
+  headers.set("x-content-type-options", "nosniff");
 
   if (request.method === "HEAD") {
     return new Response(null, { status: 200, headers });
@@ -152,26 +184,26 @@ async function handleGetFile(request: Request, env: Env, url: URL): Promise<Resp
   return new Response(object.body, { status: 200, headers });
 }
 
-async function handleDelete(request: Request, env: Env, url: URL): Promise<Response> {
-  const authError = authorize(request, env);
+async function handleDelete(request: Request, env: Env, url: URL, corsHeaders: Record<string, string>): Promise<Response> {
+  const authError = authorize(request, env, corsHeaders);
   if (authError) {
     return authError;
   }
 
   const key = url.pathname.replace(/^\/files\//, "");
   if (!key || key.includes("..")) {
-    return json({ error: "Invalid key" }, 400);
+    return json({ error: "Invalid key" }, 400, corsHeaders);
   }
 
   await env.ASSETS_BUCKET.delete(key);
-  return json({ ok: true, key }, 200);
+  return json({ ok: true, key }, 200, corsHeaders);
 }
 
-function authorize(request: Request, env: Env): Response | null {
+function authorize(request: Request, env: Env, corsHeaders: Record<string, string>): Response | null {
   const expectedKey = env.UPLOAD_API_KEY?.trim();
   const providedKey = request.headers.get("x-upload-key")?.trim() ?? "";
   if (!expectedKey || providedKey !== expectedKey) {
-    return json({ error: "Unauthorized" }, 401);
+    return json({ error: "Unauthorized" }, 401, corsHeaders);
   }
   return null;
 }
@@ -240,7 +272,7 @@ function encodePath(value: string): string {
     .join("/");
 }
 
-function json(payload: unknown, status: number): Response {
+function json(payload: unknown, status: number, corsHeaders: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(payload, null, 2), {
     status,
     headers: {
