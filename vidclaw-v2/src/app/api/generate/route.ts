@@ -361,10 +361,16 @@ export async function POST(req: NextRequest) {
 
           await db.update(tasks).set({ status: "failed", creditsCost: 0, errorMessage: String(e).slice(0, 500) }).where(eq(tasks.id, task.id));
 
+          const errMsg = String(e);
+          let userMessage = "视频生成服务暂时不可用，积分已自动退还。";
+          if (errMsg.includes("PROMINENT_PEOPLE")) {
+            userMessage = "参考图中可能包含名人面孔，视频平台不允许生成。请更换图片后重试，积分已自动退还。";
+          }
+
           send({
             type: "error",
             code: "SORA_UNAVAILABLE",
-            message: "视频生成服务暂时不可用，积分已自动退还。",
+            message: userMessage,
             sora_prompt: scriptResult.full_sora_prompt,
           });
           send({ type: "done" });
