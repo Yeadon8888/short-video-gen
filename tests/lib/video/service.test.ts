@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   getProviderCapabilities,
   mergeVideoParamsWithModelDefaults,
+  normalizeModelDefaultParams,
   resolveVideoProvider,
 } from "../../../src/lib/video/service";
 
@@ -58,6 +59,54 @@ test("mergeVideoParamsWithModelDefaults fills missing request values from admin 
     duration: 15,
     count: 5,
     model: "custom-model",
+  });
+});
+
+test("normalizeModelDefaultParams preserves provider-specific params", () => {
+  const normalized = normalizeModelDefaultParams({
+    duration: 10,
+    allowedDurations: [10, 15],
+    watermark: false,
+    negative_prompt: "blurry",
+  });
+
+  assert.deepEqual(normalized, {
+    duration: 10,
+    allowedDurations: [10, 15],
+    watermark: false,
+    negative_prompt: "blurry",
+  });
+});
+
+test("mergeVideoParamsWithModelDefaults keeps provider-specific params for downstream adapters", () => {
+  const merged = mergeVideoParamsWithModelDefaults(
+    {
+      defaultParams: {
+        orientation: "portrait",
+        duration: 10,
+        count: 1,
+        watermark: false,
+        negative_prompt: "blurry",
+      },
+    },
+    {
+      prompt: "A product ad",
+      imageUrls: [],
+      model: "sora",
+    },
+  );
+
+  assert.deepEqual(merged, {
+    prompt: "A product ad",
+    imageUrls: [],
+    orientation: "portrait",
+    duration: 10,
+    count: 1,
+    model: "sora",
+    providerOptions: {
+      watermark: false,
+      negative_prompt: "blurry",
+    },
   });
 });
 
