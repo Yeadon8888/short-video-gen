@@ -11,13 +11,34 @@ const STATUS_ENDPOINT = "/v2/videos/generations";
 const SUCCESS_STATES = new Set(["SUCCESS", "SUCCEEDED", "COMPLETED"]);
 const FAILURE_STATES = new Set(["FAILURE", "FAILED", "ERROR", "CANCELLED"]);
 
+export function normalizePlatoBaseUrl(raw: string): string {
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  if (!trimmed) return DEFAULT_BASE_URL;
+
+  try {
+    const url = new URL(trimmed);
+    const normalizedPath = url.pathname.replace(
+      /\/v2\/videos\/generations(?:\/[^/?#]+)?$/,
+      "",
+    );
+
+    url.pathname = normalizedPath || "/";
+    url.search = "";
+    url.hash = "";
+
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return trimmed;
+  }
+}
+
 function getBaseUrl(model: VideoModelRecord): string {
-  return (
+  return normalizePlatoBaseUrl(
     model.baseUrl ||
     process.env.VIDEO_BASE_URL ||
     process.env.PLATO_BASE_URL ||
-    DEFAULT_BASE_URL
-  ).trim().replace(/\/+$/, "");
+    DEFAULT_BASE_URL,
+  );
 }
 
 function getApiKey(model: VideoModelRecord): string {

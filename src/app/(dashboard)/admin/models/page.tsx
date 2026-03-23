@@ -379,6 +379,9 @@ export default function AdminModelsPage() {
                   placeholder="https://api.bltcy.ai"
                   className="mt-1 w-full rounded-lg border border-[var(--vc-border)] bg-[var(--vc-bg-root)] px-3 py-2 text-sm text-white outline-none focus:border-[var(--vc-accent)] placeholder-zinc-600"
                 />
+                <p className="mt-2 text-xs text-zinc-500">
+                  这里填服务根地址，例如 `https://api.bltcy.ai`，不要填完整接口路径
+                </p>
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-400">API Key</label>
