@@ -21,7 +21,16 @@ export function TopBar({ user, onMenuClick }: TopBarProps) {
   const router = useRouter();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [open, setOpen] = useState(false);
-  const [readIds, setReadIds] = useState<Set<string>>(new Set());
+  const [readIds, setReadIds] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set();
+
+    try {
+      const stored = window.localStorage.getItem("vc_read_announcements");
+      return stored ? new Set(JSON.parse(stored)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -29,14 +38,6 @@ export function TopBar({ user, onMenuClick }: TopBarProps) {
       .then((r) => r.json())
       .then((data) => setAnnouncements(data))
       .catch(() => {});
-  }, []);
-
-  // Load read IDs from localStorage
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem("vc_read_announcements");
-      if (stored) setReadIds(new Set(JSON.parse(stored)));
-    } catch {}
   }, []);
 
   // Close on outside click

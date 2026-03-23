@@ -6,14 +6,45 @@ import { useGenerateStore, type GenerateParams } from "@/stores/generate";
 interface ModelOption {
   slug: string;
   name: string;
+  provider: string;
   creditsPerGen: number;
+  allowedDurations: Array<8 | 10 | 15>;
+  defaultDuration: 8 | 10 | 15;
 }
 
 const FALLBACK_MODELS: ModelOption[] = [
-  { slug: "veo3.1-fast", name: "VEO 3.1 Fast", creditsPerGen: 10 },
-  { slug: "veo3.1-components", name: "VEO 3.1 Components", creditsPerGen: 10 },
-  { slug: "veo3.1-pro-4k", name: "VEO 3.1 Pro 4K", creditsPerGen: 20 },
-  { slug: "sora", name: "Sora", creditsPerGen: 15 },
+  {
+    slug: "veo3.1-fast",
+    name: "VEO 3.1 Fast",
+    provider: "plato",
+    creditsPerGen: 10,
+    allowedDurations: [8],
+    defaultDuration: 8,
+  },
+  {
+    slug: "veo3.1-components",
+    name: "VEO 3.1 Components",
+    provider: "plato",
+    creditsPerGen: 10,
+    allowedDurations: [8],
+    defaultDuration: 8,
+  },
+  {
+    slug: "veo3.1-pro-4k",
+    name: "VEO 3.1 Pro 4K",
+    provider: "plato",
+    creditsPerGen: 20,
+    allowedDurations: [8],
+    defaultDuration: 8,
+  },
+  {
+    slug: "sora",
+    name: "Sora",
+    provider: "plato",
+    creditsPerGen: 15,
+    allowedDurations: [10, 15],
+    defaultDuration: 10,
+  },
 ];
 
 const selectClass =
@@ -33,19 +64,26 @@ export function ParamBar() {
       .catch(() => {});
   }, []);
 
-  const isVeo = params.model.startsWith("veo");
-  const isSora = !isVeo;
+  const currentModel =
+    modelOptions.find((m) => m.slug === params.model) ?? modelOptions[0];
+  const allowedDurations = currentModel?.allowedDurations ?? [8, 10, 15];
 
-  // Auto-fix duration when switching models
   useEffect(() => {
-    if (isVeo && params.duration !== 8) {
-      setParams({ duration: 8 });
-    } else if (isSora && params.duration === 8) {
-      setParams({ duration: 10 });
-    }
-  }, [params.model]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!currentModel) return;
 
-  const currentModel = modelOptions.find((m) => m.slug === params.model);
+    if (!modelOptions.some((m) => m.slug === params.model)) {
+      setParams({
+        model: currentModel.slug,
+        duration: currentModel.defaultDuration,
+      });
+      return;
+    }
+
+    if (!allowedDurations.includes(params.duration)) {
+      setParams({ duration: currentModel.defaultDuration });
+    }
+  }, [allowedDurations, currentModel, modelOptions, params.duration, params.model, setParams]);
+
   const totalCredits = (currentModel?.creditsPerGen ?? 10) * params.count;
 
   return (
@@ -65,16 +103,21 @@ export function ParamBar() {
         <option value="landscape">横屏 16:9</option>
       </select>
 
-      {isVeo ? (
-        <span className={`${selectClass} opacity-60 cursor-default`}>8 秒</span>
+      {allowedDurations.length === 1 ? (
+        <span className={`${selectClass} opacity-60 cursor-default`}>
+          {allowedDurations[0]} 秒
+        </span>
       ) : (
         <select
           value={params.duration}
           onChange={(e) => setParams({ duration: Number(e.target.value) as 8 | 10 | 15 })}
           className={selectClass}
         >
-          <option value={10}>10 秒</option>
-          <option value={15}>15 秒</option>
+          {allowedDurations.map((duration) => (
+            <option key={duration} value={duration}>
+              {duration} 秒
+            </option>
+          ))}
         </select>
       )}
 

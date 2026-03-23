@@ -24,7 +24,6 @@ export default function AdminTasksPage() {
   const [loading, setLoading] = useState(true);
 
   const fetchTasks = useCallback(async () => {
-    setLoading(true);
     const params = new URLSearchParams({ page: String(page), limit: "20" });
     if (statusFilter) params.set("status", statusFilter);
     const res = await fetch(`/api/admin/tasks?${params}`);
@@ -34,7 +33,12 @@ export default function AdminTasksPage() {
     setLoading(false);
   }, [page, statusFilter]);
 
-  useEffect(() => { fetchTasks(); }, [fetchTasks]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void fetchTasks();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchTasks]);
 
   const statusColors: Record<string, string> = {
     pending: "bg-yellow-500/20 text-yellow-400",
@@ -58,7 +62,11 @@ export default function AdminTasksPage() {
       <div className="flex items-center gap-4">
         <select
           value={statusFilter}
-          onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+          onChange={(e) => {
+            setLoading(true);
+            setStatusFilter(e.target.value);
+            setPage(1);
+          }}
           className="rounded-[var(--vc-radius-md)] border border-[var(--vc-border)] bg-[var(--vc-bg-root)] px-3 py-2 text-sm text-white transition-colors focus:border-[var(--vc-accent)] focus:outline-none"
         >
           <option value="">全部状态</option>
@@ -140,7 +148,10 @@ export default function AdminTasksPage() {
         <div className="flex items-center justify-center gap-4">
           <button
             disabled={page <= 1}
-            onClick={() => setPage(page - 1)}
+            onClick={() => {
+              setLoading(true);
+              setPage(page - 1);
+            }}
             className="rounded-[var(--vc-radius-md)] bg-[var(--vc-bg-elevated)] px-3 py-1 text-sm text-zinc-300 transition-colors hover:bg-zinc-600 disabled:opacity-50"
           >
             上一页
@@ -150,7 +161,10 @@ export default function AdminTasksPage() {
           </span>
           <button
             disabled={page >= Math.ceil(total / 20)}
-            onClick={() => setPage(page + 1)}
+            onClick={() => {
+              setLoading(true);
+              setPage(page + 1);
+            }}
             className="rounded-[var(--vc-radius-md)] bg-[var(--vc-bg-elevated)] px-3 py-1 text-sm text-zinc-300 transition-colors hover:bg-zinc-600 disabled:opacity-50"
           >
             下一页

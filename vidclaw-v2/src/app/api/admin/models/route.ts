@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { models } from "@/lib/db/schema";
 import { eq, asc } from "drizzle-orm";
+import { normalizeModelDefaultParams } from "@/lib/video/service";
 
 /** GET /api/admin/models — list all video models (admin only) */
 export async function GET() {
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
       isActive: body.isActive ?? true,
       apiKey: body.apiKey || null,
       baseUrl: body.baseUrl || null,
-      defaultParams: body.defaultParams ?? {},
+      defaultParams: normalizeModelDefaultParams(body.defaultParams),
       sortOrder: body.sortOrder ?? 0,
     })
     .returning();
@@ -67,6 +68,8 @@ export async function PATCH(req: NextRequest) {
   const body = (await req.json()) as {
     id: string;
     name?: string;
+    slug?: string;
+    provider?: string;
     creditsPerGen?: number;
     isActive?: boolean;
     apiKey?: string | null;
@@ -81,11 +84,15 @@ export async function PATCH(req: NextRequest) {
 
   const updates: Record<string, unknown> = {};
   if (body.name !== undefined) updates.name = body.name;
+  if (body.slug !== undefined) updates.slug = body.slug;
+  if (body.provider !== undefined) updates.provider = body.provider;
   if (body.creditsPerGen !== undefined) updates.creditsPerGen = body.creditsPerGen;
   if (body.isActive !== undefined) updates.isActive = body.isActive;
   if (body.apiKey !== undefined) updates.apiKey = body.apiKey || null;
   if (body.baseUrl !== undefined) updates.baseUrl = body.baseUrl || null;
-  if (body.defaultParams !== undefined) updates.defaultParams = body.defaultParams;
+  if (body.defaultParams !== undefined) {
+    updates.defaultParams = normalizeModelDefaultParams(body.defaultParams);
+  }
   if (body.sortOrder !== undefined) updates.sortOrder = body.sortOrder;
 
   if (Object.keys(updates).length === 0) {

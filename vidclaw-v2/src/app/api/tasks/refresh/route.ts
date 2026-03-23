@@ -1,14 +1,13 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { queryTaskStatus, type ApiOverrides } from "@/lib/video/plato";
 import { db } from "@/lib/db";
 import { tasks, taskItems } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import {
   ACTIVE_TASK_STATUSES,
   finalizeTaskIfTerminal,
-  getModelApiOverrides,
 } from "@/lib/tasks/reconciliation";
+import { queryVideoTaskStatus } from "@/lib/video/service";
 
 /**
  * GET /api/tasks/refresh
@@ -49,13 +48,13 @@ export async function GET() {
     );
     if (pendingItems.length === 0 && items.length === 0) continue;
 
-    // Resolve model API overrides
-    const apiOverrides: ApiOverrides = await getModelApiOverrides(task.modelId);
-
     // Poll each pending item
     for (const item of pendingItems) {
       try {
-        const result = await queryTaskStatus(item.providerTaskId!, apiOverrides);
+        const result = await queryVideoTaskStatus({
+          modelId: task.modelId,
+          taskId: item.providerTaskId!,
+        });
         await db
           .update(taskItems)
           .set({
