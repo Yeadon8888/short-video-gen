@@ -66,6 +66,7 @@ export const models = pgTable("models", {
     duration?: number;
     count?: number;
     allowedDurations?: number[];
+    [key: string]: unknown;
   }>().default({}),
   sortOrder: integer("sort_order").default(0).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

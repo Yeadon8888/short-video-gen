@@ -15,6 +15,7 @@ export interface VideoModelDefaultParams {
   duration?: 8 | 10 | 15;
   count?: number;
   allowedDurations?: Array<8 | 10 | 15>;
+  [key: string]: unknown;
 }
 
 export interface VideoModelRecord {
@@ -85,6 +86,20 @@ function toCount(value: unknown): number | undefined {
   return Math.min(normalized, 10);
 }
 
+function extractProviderOptions(
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  const {
+    orientation: _orientation,
+    duration: _duration,
+    count: _count,
+    allowedDurations: _allowedDurations,
+    ...providerOptions
+  } = value;
+
+  return providerOptions;
+}
+
 export function normalizeModelDefaultParams(
   value: unknown,
 ): VideoModelDefaultParams {
@@ -95,7 +110,10 @@ export function normalizeModelDefaultParams(
     : undefined;
   const count = toCount(value.count);
 
+  const providerOptions = extractProviderOptions(value);
+
   return {
+    ...providerOptions,
     ...(isOrientation(value.orientation)
       ? { orientation: value.orientation }
       : {}),
@@ -170,6 +188,7 @@ export function mergeVideoParamsWithModelDefaults(
     durationCandidate && capabilities.allowedDurations.includes(durationCandidate)
       ? durationCandidate
       : capabilities.defaultDuration;
+  const providerOptions = extractProviderOptions(defaults);
 
   return {
     prompt: request.prompt,
@@ -178,6 +197,9 @@ export function mergeVideoParamsWithModelDefaults(
     duration,
     count: request.count ?? defaults.count ?? 1,
     model: request.model,
+    ...(Object.keys(providerOptions).length > 0
+      ? { providerOptions }
+      : {}),
   };
 }
 

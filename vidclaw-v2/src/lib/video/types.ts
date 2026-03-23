@@ -7,6 +7,7 @@ export interface VideoParams {
   duration: 8 | 10 | 15;
   count: number;
   model?: string;
+  providerOptions?: Record<string, unknown>;
 }
 
 export interface TaskResult {

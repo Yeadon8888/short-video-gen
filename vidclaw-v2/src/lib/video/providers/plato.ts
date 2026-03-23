@@ -201,14 +201,22 @@ export const platoProvider: VideoProviderAdapter = {
   },
   async createTasks({ model, params }) {
     const taskIds: string[] = [];
+    const providerOptions = params.providerOptions ?? {};
     const payload = {
+      ...providerOptions,
       prompt: params.prompt,
       model: model.slug,
       images: params.imageUrls ?? [],
       aspect_ratio: toAspectRatio(params.orientation),
       duration: params.duration,
-      watermark: true,
-      private: false,
+      watermark:
+        typeof providerOptions.watermark === "boolean"
+          ? providerOptions.watermark
+          : true,
+      private:
+        typeof providerOptions.private === "boolean"
+          ? providerOptions.private
+          : false,
       ...(getHdEnabled() ? { hd: true } : {}),
     };
 
