@@ -1,8 +1,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { creditTxns, models, tasks, users } from "@/lib/db/schema";
+import { creditTxns, tasks, users } from "@/lib/db/schema";
 import type { Task } from "@/lib/db/schema";
-import type { ApiOverrides } from "@/lib/video/plato";
 
 export const ACTIVE_TASK_STATUSES = [
   "pending",
@@ -120,21 +119,6 @@ export function resolveStatusPollScope(
     taskId: rows[0].taskId,
     modelId: rows[0].modelId,
   };
-}
-
-export async function getModelApiOverrides(
-  modelId: string | null | undefined,
-): Promise<ApiOverrides> {
-  if (!modelId) return {};
-
-  const [modelRow] = await db
-    .select({ apiKey: models.apiKey, baseUrl: models.baseUrl })
-    .from(models)
-    .where(eq(models.id, modelId))
-    .limit(1);
-
-  if (!modelRow) return {};
-  return { apiKey: modelRow.apiKey, baseUrl: modelRow.baseUrl };
 }
 
 export async function finalizeTaskIfTerminal(params: {

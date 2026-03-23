@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { queryTaskStatus, type ApiOverrides } from "@/lib/video/plato";
 import { db } from "@/lib/db";
 import { tasks, taskItems } from "@/lib/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import {
   finalizeTaskIfTerminal,
-  getModelApiOverrides,
   resolveStatusPollScope,
 } from "@/lib/tasks/reconciliation";
+import { queryVideoTaskStatus } from "@/lib/video/service";
 
 /**
  * GET /api/generate/status?taskIds=id1,id2
@@ -53,12 +52,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
 
-  const apiOverrides: ApiOverrides = await getModelApiOverrides(scope.modelId);
-
   const results = await Promise.all(
     providerTaskIds.map(async (taskId) => {
       try {
-        const result = await queryTaskStatus(taskId, apiOverrides);
+        const result = await queryVideoTaskStatus({
+          modelId: scope.modelId,
+          taskId,
+        });
 
         // Update task item in DB
         await db

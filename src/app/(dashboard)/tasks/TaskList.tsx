@@ -29,7 +29,10 @@ export function TaskList({ initialTasks }: { initialTasks: Task[] }) {
   const [taskList, setTaskList] = useState<Task[]>(initialTasks);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const taskListRef = useRef(taskList);
-  taskListRef.current = taskList;
+
+  useEffect(() => {
+    taskListRef.current = taskList;
+  }, [taskList]);
 
   // Stable refresh function via ref — no dependency on taskList
   useEffect(() => {
@@ -86,7 +89,6 @@ export function TaskList({ initialTasks }: { initialTasks: Task[] }) {
         const params = task.paramsJson as { count?: number } | null;
         const requestedCount = params?.count ?? 1;
         const successCount = resultUrls.length;
-        const isPartial = task.status === "done" && successCount < requestedCount;
 
         return (
           <div

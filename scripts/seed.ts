@@ -22,6 +22,7 @@ const defaultModels = [
     slug: "veo3.1-fast",
     provider: "plato",
     creditsPerGen: 5,
+    defaultParams: { duration: 8, allowedDurations: [8] },
     sortOrder: 0,
   },
   {
@@ -29,6 +30,7 @@ const defaultModels = [
     slug: "veo3.1-components",
     provider: "plato",
     creditsPerGen: 8,
+    defaultParams: { duration: 8, allowedDurations: [8] },
     sortOrder: 1,
   },
   {
@@ -36,6 +38,7 @@ const defaultModels = [
     slug: "veo3.1-pro-4k",
     provider: "plato",
     creditsPerGen: 15,
+    defaultParams: { duration: 8, allowedDurations: [8] },
     sortOrder: 2,
   },
   {
@@ -43,6 +46,7 @@ const defaultModels = [
     slug: "sora",
     provider: "plato",
     creditsPerGen: 10,
+    defaultParams: { duration: 10, allowedDurations: [10, 15] },
     sortOrder: 3,
   },
 ];

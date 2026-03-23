@@ -64,6 +64,8 @@ export const models = pgTable("models", {
   defaultParams: jsonb("default_params").$type<{
     orientation?: "portrait" | "landscape";
     duration?: number;
+    count?: number;
+    allowedDurations?: number[];
   }>().default({}),
   sortOrder: integer("sort_order").default(0).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

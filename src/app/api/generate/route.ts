@@ -6,7 +6,6 @@ import {
   fetchAssetBuffer,
   loadUserPrompts,
 } from "@/lib/storage/gateway";
-import { createTasks, type ApiOverrides } from "@/lib/video/plato";
 import type { VideoParams, GenerateRequest } from "@/lib/video/types";
 import {
   isTikHubEnabled,
@@ -17,6 +16,10 @@ import { db } from "@/lib/db";
 import { tasks, taskItems, creditTxns, users, models, userAssets } from "@/lib/db/schema";
 import { eq, sql, and, desc } from "drizzle-orm";
 import { failTaskAndRefund } from "@/lib/tasks/reconciliation";
+import {
+  createVideoTasks,
+  resolveActiveVideoModel,
+} from "@/lib/video/service";
 
 export const maxDuration = 300; // Vercel max
 
@@ -55,13 +58,9 @@ export async function POST(req: NextRequest) {
 
       try {
         // ── Step 0: Check credits ──
-        const modelSlug = params.model || "veo3.1-fast";
-        const [modelRow] = await db
-          .select()
-          .from(models)
-          .where(eq(models.slug, modelSlug))
-          .limit(1);
-        const creditsPerGen = modelRow?.creditsPerGen ?? 10;
+        const modelRow = await resolveActiveVideoModel(params.model);
+        const modelSlug = modelRow.slug;
+        const creditsPerGen = modelRow.creditsPerGen;
         const totalCost = creditsPerGen * Math.min(Math.max(params.count, 1), 10);
 
         if (user.credits < totalCost) {
@@ -333,25 +332,26 @@ export async function POST(req: NextRequest) {
         const { task } = immediateResult;
 
         // ── Step 5: Submit Sora task ──
-        const videoParams: VideoParams = {
+        const videoRequest = {
           prompt: soraPrompt,
           imageUrls: imageUrls.slice(0, 1),
           orientation: params.orientation,
           duration: params.duration,
           count,
-          model: params.model,
+          model: modelSlug,
         };
 
         send({ type: "stage", stage: "GENERATE", message: "提交 Sora 任务..." });
 
-        const apiOverrides: ApiOverrides = {
-          apiKey: modelRow?.apiKey,
-          baseUrl: modelRow?.baseUrl,
-        };
-
         let providerTaskIds: string[];
+        let resolvedVideoParams: VideoParams;
         try {
-          providerTaskIds = await createTasks(videoParams, apiOverrides);
+          const submitted = await createVideoTasks({
+            model: modelRow,
+            request: videoRequest,
+          });
+          providerTaskIds = submitted.providerTaskIds;
+          resolvedVideoParams = submitted.resolvedParams;
           log(`任务已提交: ${providerTaskIds.join(", ")}`);
         } catch (e) {
           console.error("[generate] Provider task creation failed", {
@@ -404,6 +404,7 @@ export async function POST(req: NextRequest) {
           taskIds: providerTaskIds,
           dbTaskId: task.id,
           sora_prompt: soraPrompt,
+          resolved_params: resolvedVideoParams,
         });
 
         send({ type: "done" });

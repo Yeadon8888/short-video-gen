@@ -2,13 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { tasks, taskItems } from "@/lib/db/schema";
 import { eq, and, inArray, lte } from "drizzle-orm";
-import { queryTaskStatus, type ApiOverrides } from "@/lib/video/plato";
 import {
   ACTIVE_TASK_STATUSES,
   failTaskAndRefund,
   finalizeTaskIfTerminal,
-  getModelApiOverrides,
 } from "@/lib/tasks/reconciliation";
+import { queryVideoTaskStatus } from "@/lib/video/service";
 
 const TIMEOUT_MINUTES = 60;
 
@@ -66,12 +65,13 @@ export async function GET(req: NextRequest) {
       continue;
     }
 
-    const apiOverrides: ApiOverrides = await getModelApiOverrides(task.modelId);
-
     for (const item of items) {
       if (!item.providerTaskId) continue;
       try {
-        const result = await queryTaskStatus(item.providerTaskId, apiOverrides);
+        const result = await queryVideoTaskStatus({
+          modelId: task.modelId,
+          taskId: item.providerTaskId,
+        });
         await db
           .update(taskItems)
           .set({

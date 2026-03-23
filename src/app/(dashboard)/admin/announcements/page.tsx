@@ -18,14 +18,18 @@ export default function AdminAnnouncementsPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const fetchList = useCallback(async () => {
-    setLoading(true);
     const res = await fetch("/api/admin/announcements");
     const data = await res.json();
     setList(data);
     setLoading(false);
   }, []);
 
-  useEffect(() => { fetchList(); }, [fetchList]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void fetchList();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchList]);
 
   async function handleCreate() {
     if (!content.trim() || submitting) return;
@@ -37,13 +41,15 @@ export default function AdminAnnouncementsPage() {
     });
     setContent("");
     setSubmitting(false);
-    fetchList();
+    setLoading(true);
+    void fetchList();
   }
 
   async function handleDelete(id: string) {
     if (!confirm("确认删除这条公告？")) return;
     await fetch(`/api/admin/announcements?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-    fetchList();
+    setLoading(true);
+    void fetchList();
   }
 
   return (

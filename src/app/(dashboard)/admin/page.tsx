@@ -21,7 +21,6 @@ export default function AdminUsersPage() {
   const [loading, setLoading] = useState(true);
 
   const fetchUsers = useCallback(async () => {
-    setLoading(true);
     const params = new URLSearchParams({ page: String(page), limit: "20" });
     if (search) params.set("search", search);
     const res = await fetch(`/api/admin/users?${params}`);
@@ -31,15 +30,21 @@ export default function AdminUsersPage() {
     setLoading(false);
   }, [page, search]);
 
-  useEffect(() => { fetchUsers(); }, [fetchUsers]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void fetchUsers();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchUsers]);
 
   async function updateUser(userId: string, updates: Partial<User>) {
+    setLoading(true);
     await fetch("/api/admin/users", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId, ...updates }),
     });
-    fetchUsers();
+    void fetchUsers();
   }
 
   async function grantCredits(userId: string) {
@@ -48,12 +53,13 @@ export default function AdminUsersPage() {
     const amount = parseInt(input, 10);
     if (isNaN(amount) || amount === 0) return;
     const reason = prompt("备注原因（可选）：") || undefined;
+    setLoading(true);
     await fetch("/api/admin/credits", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId, amount, reason }),
     });
-    fetchUsers();
+    void fetchUsers();
   }
 
   return (
@@ -71,7 +77,11 @@ export default function AdminUsersPage() {
           type="text"
           placeholder="搜索邮箱或用户名..."
           value={search}
-          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+          onChange={(e) => {
+            setLoading(true);
+            setSearch(e.target.value);
+            setPage(1);
+          }}
           className="w-full rounded-[var(--vc-radius-md)] border border-[var(--vc-border)] bg-[var(--vc-bg-root)] px-3 py-2 text-sm text-white placeholder-zinc-500 transition-colors focus:border-[var(--vc-accent)] focus:outline-none sm:w-72"
         />
         <span className="text-sm text-[var(--vc-text-muted)]">共 {total} 个用户</span>
@@ -169,7 +179,10 @@ export default function AdminUsersPage() {
         <div className="flex items-center justify-center gap-4">
           <button
             disabled={page <= 1}
-            onClick={() => setPage(page - 1)}
+            onClick={() => {
+              setLoading(true);
+              setPage(page - 1);
+            }}
             className="rounded-[var(--vc-radius-md)] bg-[var(--vc-bg-elevated)] px-3 py-1 text-sm text-zinc-300 transition-colors hover:bg-zinc-600 disabled:opacity-50"
           >
             上一页
@@ -179,7 +192,10 @@ export default function AdminUsersPage() {
           </span>
           <button
             disabled={page >= Math.ceil(total / 20)}
-            onClick={() => setPage(page + 1)}
+            onClick={() => {
+              setLoading(true);
+              setPage(page + 1);
+            }}
             className="rounded-[var(--vc-radius-md)] bg-[var(--vc-bg-elevated)] px-3 py-1 text-sm text-zinc-300 transition-colors hover:bg-zinc-600 disabled:opacity-50"
           >
             下一页
