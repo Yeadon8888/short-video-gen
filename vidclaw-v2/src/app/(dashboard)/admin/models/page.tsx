@@ -1,7 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { AdminTabs } from "@/components/admin/AdminTabs";
+import {
+  buildDefaultParamsPreview,
+  defaultParamsToEditorState,
+  editorStateToDefaultParams,
+  type ModelDefaultParamsEditorState,
+} from "@/lib/video/model-default-params-form";
 
 interface Model {
   id: string;
@@ -25,7 +31,7 @@ interface ModelFormState {
   apiKey: string;
   baseUrl: string;
   sortOrder: string;
-  defaultParamsText: string;
+  paramsEditor: ModelDefaultParamsEditorState;
 }
 
 const EMPTY_FORM: ModelFormState = {
@@ -37,12 +43,15 @@ const EMPTY_FORM: ModelFormState = {
   apiKey: "",
   baseUrl: "",
   sortOrder: "0",
-  defaultParamsText: "{\n  \"duration\": 10,\n  \"allowedDurations\": [10, 15]\n}",
+  paramsEditor: {
+    orientation: "",
+    duration: "10",
+    count: "",
+    allowedDurations: ["10", "15"],
+    watermark: "inherit",
+    extraParamsText: "{}",
+  },
 };
-
-function formatDefaultParams(value: unknown): string {
-  return JSON.stringify(value && typeof value === "object" ? value : {}, null, 2);
-}
 
 function parseForm(form: ModelFormState): {
   ok: true;
@@ -68,11 +77,9 @@ function parseForm(form: ModelFormState): {
     return { ok: false, error: "排序值不合法" };
   }
 
-  let defaultParams: Record<string, unknown> = {};
-  try {
-    defaultParams = JSON.parse(form.defaultParamsText || "{}") as Record<string, unknown>;
-  } catch {
-    return { ok: false, error: "defaultParams 不是合法 JSON" };
+  const defaultParamsResult = editorStateToDefaultParams(form.paramsEditor);
+  if (!defaultParamsResult.ok) {
+    return defaultParamsResult;
   }
 
   if (!form.name.trim() || !form.slug.trim() || !form.provider.trim()) {
@@ -90,7 +97,7 @@ function parseForm(form: ModelFormState): {
       apiKey: form.apiKey.trim() || null,
       baseUrl: form.baseUrl.trim() || null,
       sortOrder,
-      defaultParams,
+      defaultParams: defaultParamsResult.payload,
     },
   };
 }
@@ -118,6 +125,36 @@ export default function AdminModelsPage() {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  function updateParamsEditor(
+    patch: Partial<ModelDefaultParamsEditorState>,
+  ) {
+    setForm((current) => ({
+      ...current,
+      paramsEditor: {
+        ...current.paramsEditor,
+        ...patch,
+      },
+    }));
+  }
+
+  function toggleAllowedDuration(value: "8" | "10" | "15") {
+    setForm((current) => {
+      const allowedDurations = current.paramsEditor.allowedDurations.includes(value)
+        ? current.paramsEditor.allowedDurations.filter((item) => item !== value)
+        : [...current.paramsEditor.allowedDurations, value].sort(
+            (left, right) => Number(left) - Number(right),
+          ) as Array<"8" | "10" | "15">;
+
+      return {
+        ...current,
+        paramsEditor: {
+          ...current.paramsEditor,
+          allowedDurations,
+        },
+      };
+    });
+  }
+
   function openEdit(model: Model) {
     setCreating(false);
     setEditing(model);
@@ -131,7 +168,7 @@ export default function AdminModelsPage() {
       apiKey: model.apiKey ?? "",
       baseUrl: model.baseUrl ?? "",
       sortOrder: String(model.sortOrder),
-      defaultParamsText: formatDefaultParams(model.defaultParams),
+      paramsEditor: defaultParamsToEditorState(model.defaultParams),
     });
   }
 
@@ -205,6 +242,11 @@ export default function AdminModelsPage() {
     if (key.length <= 8) return "••••••••";
     return key.slice(0, 4) + "••••" + key.slice(-4);
   }
+
+  const defaultParamsPreview = useMemo(
+    () => buildDefaultParamsPreview(form.paramsEditor),
+    [form.paramsEditor],
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -414,17 +456,124 @@ export default function AdminModelsPage() {
 
             <div>
               <label className="block text-xs font-medium text-zinc-400">
-                defaultParams(JSON)
+                常用参数
+              </label>
+              <div className="mt-1 grid gap-4 rounded-xl border border-[var(--vc-border)] bg-[var(--vc-bg-root)] p-4 sm:grid-cols-2">
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400">默认画幅</label>
+                  <select
+                    value={form.paramsEditor.orientation}
+                    onChange={(event) =>
+                      updateParamsEditor({
+                        orientation: event.target.value as ModelDefaultParamsEditorState["orientation"],
+                      })
+                    }
+                    className="mt-1 w-full rounded-lg border border-[var(--vc-border)] bg-[var(--vc-bg-surface)] px-3 py-2 text-sm text-white outline-none focus:border-[var(--vc-accent)]"
+                  >
+                    <option value="">不设置</option>
+                    <option value="portrait">portrait</option>
+                    <option value="landscape">landscape</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400">默认时长</label>
+                  <select
+                    value={form.paramsEditor.duration}
+                    onChange={(event) =>
+                      updateParamsEditor({
+                        duration: event.target.value as ModelDefaultParamsEditorState["duration"],
+                      })
+                    }
+                    className="mt-1 w-full rounded-lg border border-[var(--vc-border)] bg-[var(--vc-bg-surface)] px-3 py-2 text-sm text-white outline-none focus:border-[var(--vc-accent)]"
+                  >
+                    <option value="">不设置</option>
+                    <option value="8">8 秒</option>
+                    <option value="10">10 秒</option>
+                    <option value="15">15 秒</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400">默认数量</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={form.paramsEditor.count}
+                    onChange={(event) =>
+                      updateParamsEditor({ count: event.target.value })
+                    }
+                    placeholder="留空表示不设置"
+                    className="mt-1 w-full rounded-lg border border-[var(--vc-border)] bg-[var(--vc-bg-surface)] px-3 py-2 text-sm text-white outline-none focus:border-[var(--vc-accent)] placeholder-zinc-600"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400">水印</label>
+                  <select
+                    value={form.paramsEditor.watermark}
+                    onChange={(event) =>
+                      updateParamsEditor({
+                        watermark: event.target.value as ModelDefaultParamsEditorState["watermark"],
+                      })
+                    }
+                    className="mt-1 w-full rounded-lg border border-[var(--vc-border)] bg-[var(--vc-bg-surface)] px-3 py-2 text-sm text-white outline-none focus:border-[var(--vc-accent)]"
+                  >
+                    <option value="inherit">跟随默认</option>
+                    <option value="true">保留水印</option>
+                    <option value="false">去掉水印</option>
+                  </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-zinc-400">允许时长</label>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(["8", "10", "15"] as const).map((duration) => {
+                      const active = form.paramsEditor.allowedDurations.includes(duration);
+                      return (
+                        <button
+                          key={duration}
+                          type="button"
+                          onClick={() => toggleAllowedDuration(duration)}
+                          className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
+                            active
+                              ? "border-[var(--vc-accent)] bg-[var(--vc-accent)]/15 text-[var(--vc-accent)]"
+                              : "border-[var(--vc-border)] text-zinc-400 hover:border-zinc-500 hover:text-white"
+                          }`}
+                        >
+                          {duration} 秒
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-zinc-400">
+                高级参数 JSON
               </label>
               <textarea
-                value={form.defaultParamsText}
-                onChange={(event) => updateForm("defaultParamsText", event.target.value)}
-                rows={10}
+                value={form.paramsEditor.extraParamsText}
+                onChange={(event) =>
+                  updateParamsEditor({ extraParamsText: event.target.value })
+                }
+                rows={8}
                 className="mt-1 w-full rounded-lg border border-[var(--vc-border)] bg-[var(--vc-bg-root)] px-3 py-2 font-mono text-sm text-white outline-none focus:border-[var(--vc-accent)]"
               />
               <p className="mt-2 text-xs text-zinc-500">
-                可配置如 `orientation`、`duration`、`count`、`allowedDurations`
+                这里填写 provider 专属参数，例如 `negative_prompt`、`seed`，不要重复填写上面的常用字段
               </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-zinc-400">
+                合并后的 defaultParams(JSON)
+              </label>
+              <textarea
+                value={defaultParamsPreview}
+                readOnly
+                rows={8}
+                className="mt-1 w-full rounded-lg border border-[var(--vc-border)] bg-[var(--vc-bg-root)]/70 px-3 py-2 font-mono text-sm text-zinc-300 outline-none"
+              />
             </div>
 
             <div className="flex justify-end gap-3 pt-2">
