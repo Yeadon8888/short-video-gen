@@ -89,14 +89,11 @@ function toCount(value: unknown): number | undefined {
 function extractProviderOptions(
   value: Record<string, unknown>,
 ): Record<string, unknown> {
-  const {
-    orientation: _orientation,
-    duration: _duration,
-    count: _count,
-    allowedDurations: _allowedDurations,
-    ...providerOptions
-  } = value;
-
+  const providerOptions = { ...value };
+  delete providerOptions.orientation;
+  delete providerOptions.duration;
+  delete providerOptions.count;
+  delete providerOptions.allowedDurations;
   return providerOptions;
 }
 

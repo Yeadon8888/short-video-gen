@@ -69,10 +69,10 @@ interface GenerateState {
 
 const defaultParams: GenerateParams = {
   orientation: "portrait",
-  duration: 8,
+  duration: 10,
   count: 1,
   platform: "douyin",
-  model: "veo3.1-fast",
+  model: "",
 };
 
 export const useGenerateStore = create<GenerateState>((set) => ({
