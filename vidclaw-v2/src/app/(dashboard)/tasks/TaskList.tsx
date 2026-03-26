@@ -12,6 +12,18 @@ const EXPIRY_DAYS = 3;
 const POLL_INTERVAL = 15_000; // 15 seconds
 const ACTIVE_STATUSES = ["pending", "analyzing", "generating", "polling"];
 
+function formatScheduledAt(value: string | Date | null | undefined): string | null {
+  if (!value) return null;
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(value));
+}
+
 const statusConfig: Record<string, { icon: React.ElementType; color: string; label: string }> = {
   pending: { icon: Clock, color: "text-zinc-400", label: "等待中" },
   analyzing: { icon: Loader2, color: "text-blue-400", label: "分析中" },
@@ -213,6 +225,12 @@ export function TaskList({
                 })()}
               </span>
             </div>
+
+            {task.status === "scheduled" && task.scheduledAt && (
+              <p className="mt-2 text-xs text-purple-300/90">
+                预计执行：北京时间 {formatScheduledAt(task.scheduledAt)}
+              </p>
+            )}
 
             {task.inputText && (
               <p className="mt-2 truncate text-sm text-[var(--vc-text-secondary)]">

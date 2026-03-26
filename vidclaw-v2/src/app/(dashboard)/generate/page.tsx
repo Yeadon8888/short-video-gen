@@ -180,29 +180,36 @@ export default function GeneratePage() {
 
         <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[var(--vc-border)]/60 pt-4">
           <ParamBar />
-          <div className="flex items-center gap-3">
-            {activeTab !== "batch" && (
+          <div className="flex flex-col items-end gap-2">
+            <div className="flex items-center gap-3">
+              {activeTab !== "batch" && (
+                <button
+                  onClick={() => setScheduled((value) => !value)}
+                  disabled={isLoading}
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-all ${
+                    scheduled
+                      ? "border-purple-500/40 bg-purple-500/10 text-purple-300"
+                      : "border-[var(--vc-border)] text-[var(--vc-text-muted)] hover:border-purple-500/30 hover:text-purple-300"
+                  }`}
+                >
+                  <CalendarClock className="h-3.5 w-3.5" />
+                  次日 02:00 自动执行
+                </button>
+              )}
               <button
-                onClick={() => setScheduled((value) => !value)}
-                disabled={isLoading}
-                className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-all ${
-                  scheduled
-                    ? "border-purple-500/40 bg-purple-500/10 text-purple-300"
-                    : "border-[var(--vc-border)] text-[var(--vc-text-muted)] hover:border-purple-500/30 hover:text-purple-300"
-                }`}
+                onClick={handleSubmit}
+                disabled={isSubmitDisabled()}
+                className="vc-glow-btn inline-flex items-center gap-2 px-8 py-3 text-sm"
               >
-                <CalendarClock className="h-3.5 w-3.5" />
-                定时托管
+                <Zap className="h-4 w-4" />
+                {activeTab === "batch" ? "创建批量任务" : scheduled ? "定时生成" : "生成"}
               </button>
+            </div>
+            {activeTab !== "batch" && scheduled && (
+              <p className="text-right text-xs text-[var(--vc-text-muted)]">
+                会先保存脚本并扣除积分，随后在北京时间次日凌晨 02:00 自动提交生成。
+              </p>
             )}
-            <button
-              onClick={handleSubmit}
-              disabled={isSubmitDisabled()}
-              className="vc-glow-btn inline-flex items-center gap-2 px-8 py-3 text-sm"
-            >
-              <Zap className="h-4 w-4" />
-              {activeTab === "batch" ? "创建批量任务" : scheduled ? "定时生成" : "生成"}
-            </button>
           </div>
         </div>
       </div>

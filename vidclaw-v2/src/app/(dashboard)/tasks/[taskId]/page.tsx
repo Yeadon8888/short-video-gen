@@ -13,6 +13,19 @@ import {
   getTaskSourceModeLabel,
 } from "@/lib/tasks/presentation";
 
+function formatShanghaiTime(value: string | Date | null | undefined): string | null {
+  if (!value) return null;
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(value));
+}
+
 function Section({
   title,
   children,
@@ -141,6 +154,11 @@ export default async function TaskDetailPage({
         <p className="text-sm text-[var(--vc-text-muted)]">
           创建于 {new Date(task.createdAt).toLocaleString("zh-CN")}
         </p>
+        {task.status === "scheduled" && task.scheduledAt && (
+          <p className="text-sm text-purple-300/90">
+            预计执行于 {formatShanghaiTime(task.scheduledAt)}（北京时间）
+          </p>
+        )}
         {task.taskGroupId && (
           <Link
             href={`/tasks/groups/${task.taskGroupId}`}
