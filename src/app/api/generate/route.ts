@@ -30,6 +30,18 @@ function sseData(obj: unknown): string {
   return `data: ${JSON.stringify(obj)}\n\n`;
 }
 
+function formatShanghaiTime(date: Date): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
 export async function POST(req: NextRequest) {
   // ── Rate limit check ──
   const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
@@ -306,6 +318,7 @@ export async function POST(req: NextRequest) {
           }
 
           log(`任务已加入定时托管，将在凌晨 2:00 执行`);
+          log(`预计执行时间：${formatShanghaiTime(scheduledAt)}（北京时间）`);
           send({ type: "stage", stage: "DONE" });
           send({ type: "done" });
           controller.close();

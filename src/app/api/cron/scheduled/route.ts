@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { tasks, taskItems } from "@/lib/db/schema";
-import { eq, lte, and } from "drizzle-orm";
+import { asc, eq, lte, and } from "drizzle-orm";
 import {
   failTaskAndRefund,
 } from "@/lib/tasks/reconciliation";
 import { createVideoTasksForModelId } from "@/lib/video/service";
+
+const SCHEDULED_BATCH_LIMIT = 20;
 
 /**
  * GET /api/cron/scheduled — Execute scheduled tasks whose scheduledAt has arrived.
@@ -22,7 +24,8 @@ export async function GET(req: NextRequest) {
     .select()
     .from(tasks)
     .where(and(eq(tasks.status, "scheduled"), lte(tasks.scheduledAt, now)))
-    .limit(20);
+    .orderBy(asc(tasks.scheduledAt), asc(tasks.createdAt))
+    .limit(SCHEDULED_BATCH_LIMIT);
 
   if (scheduledTasks.length === 0) {
     return NextResponse.json({ processed: 0 });
