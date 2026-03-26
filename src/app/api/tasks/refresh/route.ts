@@ -7,6 +7,7 @@ import {
   ACTIVE_TASK_STATUSES,
   finalizeTaskIfTerminal,
 } from "@/lib/tasks/reconciliation";
+import { processPendingBatchTasks } from "@/lib/tasks/batch-processing";
 import { queryVideoTaskStatus } from "@/lib/video/service";
 
 /**
@@ -21,6 +22,24 @@ export async function GET() {
   const authResult = await requireAuth();
   if (authResult instanceof NextResponse) return authResult;
   const { user } = authResult;
+
+  const activeTaskGroups = await db
+    .select({
+      id: taskGroups.id,
+      status: taskGroups.status,
+    })
+    .from(taskGroups)
+    .where(eq(taskGroups.userId, user.id))
+    .orderBy(desc(taskGroups.createdAt))
+    .limit(30);
+
+  for (const group of activeTaskGroups) {
+    if (group.status !== "pending" && group.status !== "generating") continue;
+    await processPendingBatchTasks({
+      taskGroupId: group.id,
+      limit: 2,
+    });
+  }
 
   // Fetch all user tasks for provider polling, including tasks inside groups.
   const allUserTasks = await db

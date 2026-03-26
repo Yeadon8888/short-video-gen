@@ -1,16 +1,14 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { and, eq, sql } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { creditTxns, taskGroups, taskItems, tasks, users } from "@/lib/db/schema";
-import type { BatchGenerateRequest } from "@/lib/video/types";
+import { creditTxns, taskGroups, tasks, users } from "@/lib/db/schema";
+import type { BatchGenerateRequest, TaskParamsSnapshot } from "@/lib/video/types";
 import { assignImageSequence, resolveSelectedImageAssets } from "@/lib/generate/assets";
-import { fetchAssetBuffer, loadUserPrompts } from "@/lib/storage/gateway";
-import { generateCopy, generateScript } from "@/lib/gemini";
-import { buildFinalVideoPrompt } from "@/lib/video/prompt";
-import { failTaskAndRefund } from "@/lib/tasks/reconciliation";
-import { recomputeTaskGroupSummary } from "@/lib/tasks/groups";
-import { createVideoTasks, resolveActiveVideoModel } from "@/lib/video/service";
+import { processPendingBatchTasks } from "@/lib/tasks/batch-processing";
+import { resolveActiveVideoModel } from "@/lib/video/service";
+
+export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   const authResult = await requireAuth();
@@ -50,194 +48,117 @@ export async function POST(req: NextRequest) {
     count,
     selectionMode,
   });
-  const customPrompts = await loadUserPrompts(user.id);
   const batchRunId = crypto.randomUUID();
-  const [taskGroup] = await db
-    .insert(taskGroups)
-    .values({
-      userId: user.id,
-      sourceMode: "batch",
-      status: "generating",
-      title: batchTheme,
-      batchTheme,
-      selectionMode,
-      paramsJson: {
-        orientation: body.params.orientation,
-        duration: body.params.duration,
-        count,
-        platform: body.params.platform ?? "douyin",
-        model: modelRow.slug,
-        selectedImageIds: selectedAssets.map((asset) => asset.id),
-        selectedAssets,
-      },
-      requestedCount: count,
-      creditsCost: totalCost,
-    })
-    .returning();
+  const creation = await db.transaction(async (tx) => {
+    const [deducted] = await tx
+      .update(users)
+      .set({ credits: sql`${users.credits} - ${totalCost}` })
+      .where(and(eq(users.id, user.id), sql`${users.credits} >= ${totalCost}`))
+      .returning({ credits: users.credits });
 
-  const createdTaskIds: string[] = [];
-  const errors: Array<{ index: number; message: string }> = [];
+    if (!deducted) {
+      return null;
+    }
 
-  for (const [index, assignedAsset] of assignedAssets.entries()) {
-    let currentTaskId: string | null = null;
-    try {
-      const imageAsset = await fetchAssetBuffer(assignedAsset.url);
-      const scriptResult = await generateScript({
-        type: "theme",
-        theme: batchTheme,
-        imageBuffers: [imageAsset],
-        promptTemplate: customPrompts.theme_to_video,
-        platform: body.params.platform,
-      });
-
-      if (customPrompts.copy_generation) {
-        try {
-          scriptResult.copy = await generateCopy(
-            scriptResult.full_sora_prompt,
-            customPrompts.copy_generation,
-            body.params.platform,
-          );
-        } catch {
-          // Keep Gemini-built copy if custom copy regeneration fails.
-        }
-      }
-
-      const soraPrompt = buildFinalVideoPrompt({
-        scriptPrompt: scriptResult.full_sora_prompt,
-        referenceImageCount: 1,
-      });
-
-      const immediateResult = await db.transaction(async (tx) => {
-        const [deducted] = await tx
-          .update(users)
-          .set({ credits: sql`${users.credits} - ${modelRow.creditsPerGen}` })
-          .where(and(eq(users.id, user.id), sql`${users.credits} >= ${modelRow.creditsPerGen}`))
-          .returning({ credits: users.credits });
-
-        if (!deducted) return null;
-
-        const [task] = await tx
-          .insert(tasks)
-          .values({
-            userId: user.id,
-            taskGroupId: taskGroup.id,
-            type: "theme",
-            status: "generating",
-            modelId: modelRow.id,
-            inputText: batchTheme,
-            soraPrompt,
-            scriptJson: scriptResult,
-            creditsCost: modelRow.creditsPerGen,
-            paramsJson: {
-              orientation: body.params.orientation,
-              duration: body.params.duration,
-              count: 1,
-              platform: body.params.platform ?? "douyin",
-              model: modelRow.slug,
-              imageUrls: [assignedAsset.url],
-              sourceMode: "batch",
-              batchTheme,
-              selectionMode,
-              selectedImageIds: selectedAssets.map((asset) => asset.id),
-              selectedAssets,
-              assignedAssetId: assignedAsset.id,
-              assignedAssetIndex: index,
-              batchRunId,
-              batchIndex: index + 1,
-              batchTotal: count,
-            },
-          })
-          .returning();
-
-        await tx.insert(creditTxns).values({
-          userId: user.id,
-          type: "consume",
-          amount: -modelRow.creditsPerGen,
-          reason: `批量带货生成 (${modelRow.slug} #${index + 1}/${count})`,
-          modelId: modelRow.id,
-          taskId: task.id,
-          balanceAfter: deducted.credits,
-        });
-
-        return task;
-      });
-
-      if (!immediateResult) {
-        errors.push({
-          index: index + 1,
-          message: "积分不足，批量任务已提前停止。",
-        });
-        break;
-      }
-      currentTaskId = immediateResult.id;
-
-      const submitted = await createVideoTasks({
-        model: modelRow,
-        request: {
-          prompt: soraPrompt,
-          imageUrls: [assignedAsset.url],
+    const [taskGroup] = await tx
+      .insert(taskGroups)
+      .values({
+        userId: user.id,
+        sourceMode: "batch",
+        status: "generating",
+        title: batchTheme,
+        batchTheme,
+        selectionMode,
+        paramsJson: {
           orientation: body.params.orientation,
           duration: body.params.duration,
-          count: 1,
+          count,
+          platform: body.params.platform ?? "douyin",
           model: modelRow.slug,
+          selectedImageIds: selectedAssets.map((asset) => asset.id),
+          selectedAssets,
         },
-      });
-
-      for (const providerTaskId of submitted.providerTaskIds) {
-        await db.insert(taskItems).values({
-          taskId: immediateResult.id,
-          providerTaskId,
-          status: "PENDING",
-        });
-      }
-
-      createdTaskIds.push(immediateResult.id);
-    } catch (error) {
-      const message = String(error).slice(0, 300);
-      errors.push({ index: index + 1, message });
-
-      if (currentTaskId) {
-        await failTaskAndRefund({
-          taskId: currentTaskId,
-          userId: user.id,
-          refundAmount: modelRow.creditsPerGen,
-          errorMessage: message,
-          refundReason: "批量任务提交失败自动退款",
-          allowedStatuses: ["generating"],
-        });
-      }
-    }
-  }
-
-  if (errors.length > 0) {
-    await db
-      .update(taskGroups)
-      .set({
-        errorMessage: errors.map((error) => `#${error.index} ${error.message}`).join(" | ").slice(0, 1000),
+        requestedCount: count,
+        creditsCost: totalCost,
       })
-      .where(eq(taskGroups.id, taskGroup.id));
+      .returning();
+
+    const createdTasks = await tx
+      .insert(tasks)
+      .values(
+        assignedAssets.map((assignedAsset, index) => {
+          const paramsJson: TaskParamsSnapshot = {
+            orientation: body.params.orientation,
+            duration: body.params.duration,
+            count: 1,
+            platform: body.params.platform ?? "douyin",
+            model: modelRow.slug,
+            imageUrls: [assignedAsset.url],
+            sourceMode: "batch",
+            batchTheme,
+            selectionMode,
+            selectedImageIds: selectedAssets.map((asset) => asset.id),
+            selectedAssets,
+            assignedAssetId: assignedAsset.id,
+            assignedAssetIndex: index,
+            batchRunId,
+            batchIndex: index + 1,
+            batchTotal: count,
+          };
+
+          return {
+            userId: user.id,
+            taskGroupId: taskGroup.id,
+            type: "theme" as const,
+            status: "pending" as const,
+            modelId: modelRow.id,
+            inputText: batchTheme,
+            creditsCost: modelRow.creditsPerGen,
+            paramsJson,
+          };
+        }),
+      )
+      .returning({ id: tasks.id });
+
+    await tx.insert(creditTxns).values(
+      createdTasks.map((task, index) => ({
+        userId: user.id,
+        type: "consume" as const,
+        amount: -modelRow.creditsPerGen,
+        reason: `批量带货生成 (${modelRow.slug} #${index + 1}/${count})`,
+        modelId: modelRow.id,
+        taskId: task.id,
+        balanceAfter: deducted.credits + modelRow.creditsPerGen * (count - index - 1),
+      })),
+    );
+
+    return {
+      taskGroupId: taskGroup.id,
+      taskIds: createdTasks.map((task) => task.id),
+    };
+  });
+
+  if (!creation) {
+    return NextResponse.json(
+      { error: `积分不足。需要 ${totalCost} 积分，当前余额 ${user.credits}。` },
+      { status: 400 },
+    );
   }
 
-  if (createdTaskIds.length === 0 && errors.length > 0) {
-    await db
-      .update(taskGroups)
-      .set({
-        status: "failed",
-        failedCount: errors.length,
-        completedAt: new Date(),
-      })
-      .where(eq(taskGroups.id, taskGroup.id));
-  }
-
-  await recomputeTaskGroupSummary(taskGroup.id);
+  after(async () => {
+    await processPendingBatchTasks({
+      taskGroupId: creation.taskGroupId,
+      limit: count,
+    });
+  });
 
   return NextResponse.json({
-    ok: errors.length === 0,
-    taskGroupId: taskGroup.id,
+    ok: true,
+    taskGroupId: creation.taskGroupId,
     batchRunId,
-    createdCount: createdTaskIds.length,
-    failedCount: errors.length,
-    taskIds: createdTaskIds,
-    errors,
+    createdCount: creation.taskIds.length,
+    failedCount: 0,
+    taskIds: creation.taskIds,
+    errors: [],
   });
 }
