@@ -6,6 +6,7 @@ import { Download, Clock, CheckCircle, XCircle, Loader2, AlertTriangle, Calendar
 import type { Task, TaskGroup } from "@/lib/db/schema";
 import type { TaskParamsSnapshot } from "@/lib/video/types";
 import { getTaskSourceModeLabel } from "@/lib/tasks/presentation";
+import { TaskGroupDownloadButton } from "@/components/tasks/TaskGroupDownloadButton";
 
 const EXPIRY_DAYS = 3;
 const POLL_INTERVAL = 15_000; // 15 seconds
@@ -151,6 +152,10 @@ export function TaskList({
                   >
                     查看任务组
                   </Link>
+                  <TaskGroupDownloadButton
+                    groupId={group.id}
+                    disabled={group.successCount === 0}
+                  />
                 </div>
               </div>
             );
