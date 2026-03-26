@@ -19,7 +19,7 @@ export default async function AssetsPage() {
   return (
     <div className="mx-auto max-w-4xl space-y-4 sm:space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-bold text-white sm:text-xl">参考图片</h1>
+        <h1 className="text-lg font-bold text-white sm:text-xl">产品图片</h1>
       </div>
       <AssetGrid initialAssets={assets} />
     </div>

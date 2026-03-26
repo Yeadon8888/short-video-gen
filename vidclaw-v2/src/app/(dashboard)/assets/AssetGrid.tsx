@@ -7,6 +7,7 @@ import {
   inspectReferenceImageUpload,
   MAX_REFERENCE_IMAGE_UPLOAD_BYTES,
 } from "@/lib/assets/image-preflight";
+import { invalidateProductImagesCache } from "@/lib/assets/product-images-client";
 
 const MAX_REFERENCE_IMAGE_DIMENSION = 2048;
 
@@ -138,6 +139,7 @@ export function AssetGrid({ initialAssets }: { initialAssets: UserAsset[] }) {
         if (uploadRes.ok) {
           const asset = await uploadRes.json();
           setAssets((prev) => [asset, ...prev]);
+          invalidateProductImagesCache();
         } else {
           const data = await uploadRes.json().catch(() => ({}));
           setError(
@@ -158,6 +160,7 @@ export function AssetGrid({ initialAssets }: { initialAssets: UserAsset[] }) {
     const res = await fetch(`/api/assets/${assetId}`, { method: "DELETE" });
     if (res.ok) {
       setAssets((prev) => prev.filter((a) => a.id !== assetId));
+      invalidateProductImagesCache();
     } else {
       setError("删除失败");
     }
@@ -172,7 +175,7 @@ export function AssetGrid({ initialAssets }: { initialAssets: UserAsset[] }) {
         className="flex w-full items-center justify-center gap-2 rounded-[var(--vc-radius-lg)] border-2 border-dashed border-[var(--vc-border)] bg-transparent py-6 text-sm text-[var(--vc-text-muted)] transition-all duration-200 hover:border-[var(--vc-accent)]/40 hover:text-[var(--vc-accent)] disabled:opacity-50 sm:py-8"
       >
         <Upload className="h-5 w-5" />
-        {uploading ? "上传中..." : "点击上传参考图片（支持多选）"}
+        {uploading ? "上传中..." : "点击上传产品图片（支持多选）"}
       </button>
       <input
         ref={fileInputRef}
@@ -199,7 +202,7 @@ export function AssetGrid({ initialAssets }: { initialAssets: UserAsset[] }) {
         <div className="vc-card p-8 text-center">
           <ImageIcon className="mx-auto h-8 w-8 text-[var(--vc-text-dim)]" />
           <p className="mt-2 text-sm text-[var(--vc-text-muted)]">
-            暂无参考图片，请先上传产品图或风格图
+            暂无产品图片，请先上传产品图或风格图
           </p>
         </div>
       ) : (
@@ -211,7 +214,7 @@ export function AssetGrid({ initialAssets }: { initialAssets: UserAsset[] }) {
             >
               <img
                 src={asset.url}
-                alt={asset.filename ?? "参考图片"}
+                alt={asset.filename ?? "产品图片"}
                 className="aspect-square w-full object-cover"
               />
               <div className="absolute inset-0 flex items-end bg-gradient-to-t from-black/70 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100">

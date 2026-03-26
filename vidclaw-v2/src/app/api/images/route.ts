@@ -3,12 +3,11 @@ import { requireAuth } from "@/lib/auth";
 import {
   deleteAsset,
   isUploadGatewayEnabled,
-  listAssets,
   uploadAsset,
 } from "@/lib/storage/gateway";
 import { db } from "@/lib/db";
 import { userAssets } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 
 /** GET /api/images — list user's reference images */
 export async function GET() {
@@ -16,19 +15,25 @@ export async function GET() {
   if (authResult instanceof NextResponse) return authResult;
   const { user } = authResult;
 
-  if (!isUploadGatewayEnabled()) {
-    return NextResponse.json({ urls: [], gateway_enabled: false });
-  }
-
   try {
-    const all = await listAssets(user.id);
-    const urls = all.filter((a) =>
-      /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i.test(a.url),
-    );
-    return NextResponse.json({ urls, gateway_enabled: true });
+    const assets = await db
+      .select({
+        id: userAssets.id,
+        url: userAssets.url,
+        filename: userAssets.filename,
+        createdAt: userAssets.createdAt,
+      })
+      .from(userAssets)
+      .where(and(eq(userAssets.userId, user.id), eq(userAssets.type, "image")))
+      .orderBy(desc(userAssets.createdAt));
+
+    return NextResponse.json({
+      assets,
+      gateway_enabled: isUploadGatewayEnabled(),
+    });
   } catch (e) {
     return NextResponse.json(
-      { urls: [], gateway_enabled: true, error: String(e) },
+      { assets: [], gateway_enabled: isUploadGatewayEnabled(), error: String(e) },
       { status: 502 },
     );
   }

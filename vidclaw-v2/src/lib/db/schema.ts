@@ -8,7 +8,6 @@ import {
   timestamp,
   jsonb,
   pgEnum,
-  primaryKey,
 } from "drizzle-orm/pg-core";
 
 // ─── Enums ───
@@ -72,11 +71,40 @@ export const models = pgTable("models", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+// ─── Task Groups (批量任务组) ───
+
+export const taskGroups = pgTable("task_groups", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  sourceMode: varchar("source_mode", { length: 20 }).notNull(),
+  status: taskStatusEnum("status").default("pending").notNull(),
+  title: text("title"),
+  batchTheme: text("batch_theme"),
+  selectionMode: varchar("selection_mode", { length: 20 }),
+  paramsJson: jsonb("params_json").$type<{
+    orientation: "portrait" | "landscape";
+    duration: 8 | 10 | 15;
+    count: number;
+    platform: "douyin" | "tiktok";
+    model: string;
+    selectedImageIds?: string[];
+    selectedAssets?: { id: string; url: string; filename?: string | null }[];
+  }>(),
+  requestedCount: integer("requested_count").default(0).notNull(),
+  successCount: integer("success_count").default(0).notNull(),
+  failedCount: integer("failed_count").default(0).notNull(),
+  creditsCost: integer("credits_cost").default(0).notNull(),
+  errorMessage: text("error_message"),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 // ─── Tasks (视频生成任务) ───
 
 export const tasks = pgTable("tasks", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  taskGroupId: uuid("task_group_id").references(() => taskGroups.id, { onDelete: "set null" }),
   type: taskTypeEnum("type").notNull(),
   status: taskStatusEnum("status").default("pending").notNull(),
   modelId: uuid("model_id").references(() => models.id),
@@ -87,12 +115,23 @@ export const tasks = pgTable("tasks", {
   resultUrls: jsonb("result_urls").$type<string[]>().default([]),
   creditsCost: integer("credits_cost").default(0).notNull(),
   paramsJson: jsonb("params_json").$type<{
-    orientation: string;
-    duration: number;
+    orientation: "portrait" | "landscape";
+    duration: 8 | 10 | 15;
     count: number;
-    platform: string;
+    platform: "douyin" | "tiktok";
     model: string;
     imageUrls?: string[];
+    sourceMode?: "theme" | "url" | "upload" | "batch";
+    creativeBrief?: string;
+    batchTheme?: string;
+    selectionMode?: "single" | "sequence";
+    selectedImageIds?: string[];
+    selectedAssets?: { id: string; url: string; filename?: string | null }[];
+    assignedAssetId?: string;
+    assignedAssetIndex?: number;
+    batchRunId?: string;
+    batchIndex?: number;
+    batchTotal?: number;
   }>(),
   errorMessage: text("error_message"),
   /** When set, task is deferred to this time (定时托管) */
@@ -167,6 +206,8 @@ export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Model = typeof models.$inferSelect;
 export type NewModel = typeof models.$inferInsert;
+export type TaskGroup = typeof taskGroups.$inferSelect;
+export type NewTaskGroup = typeof taskGroups.$inferInsert;
 export type Task = typeof tasks.$inferSelect;
 export type NewTask = typeof tasks.$inferInsert;
 export type TaskItem = typeof taskItems.$inferSelect;

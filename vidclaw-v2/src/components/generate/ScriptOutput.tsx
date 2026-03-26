@@ -26,8 +26,11 @@ function CopyButton({ text }: { text: string }) {
 
 export function ScriptOutput() {
   const script = useGenerateStore((s) => s.script);
+  const soraPrompt = useGenerateStore((s) => s.soraPrompt);
 
   if (!script) return null;
+
+  const displayPrompt = soraPrompt ?? script.full_sora_prompt;
 
   return (
     <div className="space-y-4">
@@ -76,10 +79,10 @@ export function ScriptOutput() {
       <div className="vc-card vc-animate-in p-4" style={{ animationDelay: "150ms" }}>
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-zinc-300">完整 Sora Prompt</h3>
-          <CopyButton text={script.full_sora_prompt} />
+          <CopyButton text={displayPrompt} />
         </div>
         <p className="mt-2 text-xs leading-relaxed text-[var(--vc-text-secondary)]">
-          {script.full_sora_prompt}
+          {displayPrompt}
         </p>
       </div>
 

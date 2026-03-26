@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Download, Clock, CheckCircle, XCircle, Loader2, AlertTriangle, CalendarClock } from "lucide-react";
-import type { Task } from "@/lib/db/schema";
+import type { Task, TaskGroup } from "@/lib/db/schema";
+import type { TaskParamsSnapshot } from "@/lib/video/types";
+import { getTaskSourceModeLabel } from "@/lib/tasks/presentation";
 
 const EXPIRY_DAYS = 3;
 const POLL_INTERVAL = 15_000; // 15 seconds
@@ -25,28 +28,49 @@ function daysUntilExpiry(createdAt: string | Date): number {
   return Math.max(0, Math.ceil((expiry.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)));
 }
 
-export function TaskList({ initialTasks }: { initialTasks: Task[] }) {
+export function TaskList({
+  initialTasks,
+  initialTaskGroups,
+}: {
+  initialTasks: Task[];
+  initialTaskGroups: TaskGroup[];
+}) {
   const [taskList, setTaskList] = useState<Task[]>(initialTasks);
+  const [taskGroups, setTaskGroups] = useState<TaskGroup[]>(initialTaskGroups);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const taskListRef = useRef(taskList);
+  const taskGroupRef = useRef(taskGroups);
 
   useEffect(() => {
     taskListRef.current = taskList;
   }, [taskList]);
 
+  useEffect(() => {
+    taskGroupRef.current = taskGroups;
+  }, [taskGroups]);
+
   // Stable refresh function via ref — no dependency on taskList
   useEffect(() => {
-    const hasActive = taskList.some((t) => ACTIVE_STATUSES.includes(t.status));
+    const hasActive =
+      taskList.some((t) => ACTIVE_STATUSES.includes(t.status)) ||
+      taskGroups.some((group) => ACTIVE_STATUSES.includes(group.status));
 
     if (hasActive && !timerRef.current) {
       timerRef.current = setInterval(async () => {
-        const current = taskListRef.current;
-        if (!current.some((t) => ACTIVE_STATUSES.includes(t.status))) return;
+        const currentTasks = taskListRef.current;
+        const currentGroups = taskGroupRef.current;
+        if (
+          !currentTasks.some((t) => ACTIVE_STATUSES.includes(t.status)) &&
+          !currentGroups.some((group) => ACTIVE_STATUSES.includes(group.status))
+        ) {
+          return;
+        }
         try {
           const res = await fetch("/api/tasks/refresh");
           if (!res.ok) return;
           const data = await res.json();
           setTaskList(data.tasks);
+          setTaskGroups(data.taskGroups ?? []);
         } catch {
           // silently ignore
         }
@@ -62,9 +86,9 @@ export function TaskList({ initialTasks }: { initialTasks: Task[] }) {
         timerRef.current = null;
       }
     };
-  }, [taskList]);
+  }, [taskGroups, taskList]);
 
-  if (taskList.length === 0) {
+  if (taskList.length === 0 && taskGroups.length === 0) {
     return (
       <div className="vc-card p-8 text-center text-sm text-[var(--vc-text-muted)]">
         暂无任务记录
@@ -82,7 +106,61 @@ export function TaskList({ initialTasks }: { initialTasks: Task[] }) {
         </p>
       </div>
 
-      {taskList.map((task) => {
+      {taskGroups.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-semibold text-white">批量任务组</h2>
+          {taskGroups.map((group) => {
+            const cfg = statusConfig[group.status] ?? statusConfig.pending;
+            const Icon = cfg.icon;
+            return (
+              <div
+                key={group.id}
+                className="vc-card p-4 transition-all duration-200 hover:shadow-[var(--vc-shadow-md)]"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Icon
+                      className={`h-4 w-4 ${cfg.color} ${
+                        ["analyzing", "generating", "polling"].includes(group.status)
+                          ? "animate-spin"
+                          : ""
+                      }`}
+                    />
+                    <span className={`text-sm ${cfg.color}`}>{cfg.label}</span>
+                    <span className="rounded-[var(--vc-radius-sm)] bg-[var(--vc-bg-elevated)] px-1.5 py-0.5 text-xs text-[var(--vc-text-muted)]">
+                      批量带货
+                    </span>
+                    <span className="text-xs text-[var(--vc-text-muted)]">
+                      {group.successCount}/{group.requestedCount} 成功
+                    </span>
+                  </div>
+                  <span className="text-xs text-[var(--vc-text-dim)]">
+                    {new Date(group.createdAt).toLocaleString("zh-CN")}
+                  </span>
+                </div>
+                <p className="mt-2 truncate text-sm text-[var(--vc-text-secondary)]">
+                  {group.title || group.batchTheme || "批量带货任务"}
+                </p>
+                {group.errorMessage && (
+                  <p className="mt-2 text-xs text-[var(--vc-error)]">{group.errorMessage}</p>
+                )}
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Link
+                    href={`/tasks/groups/${group.id}`}
+                    className="inline-flex items-center rounded-[var(--vc-radius-md)] border border-[var(--vc-border)] px-3 py-1 text-xs text-[var(--vc-text-secondary)] transition-colors hover:bg-white/[0.04] hover:text-white"
+                  >
+                    查看任务组
+                  </Link>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {taskList.length > 0 && (
+        <div className="space-y-3">
+          {taskList.map((task) => {
         const cfg = statusConfig[task.status] ?? statusConfig.pending;
         const Icon = cfg.icon;
         const resultUrls = (task.resultUrls as string[]) ?? [];
@@ -110,7 +188,7 @@ export function TaskList({ initialTasks }: { initialTasks: Task[] }) {
                     : cfg.label}
                 </span>
                 <span className="rounded-[var(--vc-radius-sm)] bg-[var(--vc-bg-elevated)] px-1.5 py-0.5 text-xs text-[var(--vc-text-muted)]">
-                  {task.type}
+                  {getTaskSourceModeLabel((task.paramsJson as TaskParamsSnapshot | null)?.sourceMode)}
                 </span>
                 {task.creditsCost > 0 && (
                   <span className="text-xs text-[var(--vc-text-muted)]">
@@ -141,6 +219,15 @@ export function TaskList({ initialTasks }: { initialTasks: Task[] }) {
               <p className="mt-2 text-xs text-[var(--vc-error)]">{task.errorMessage}</p>
             )}
 
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Link
+                href={`/tasks/${task.id}`}
+                className="inline-flex items-center rounded-[var(--vc-radius-md)] border border-[var(--vc-border)] px-3 py-1 text-xs text-[var(--vc-text-secondary)] transition-colors hover:bg-white/[0.04] hover:text-white"
+              >
+                查看详情
+              </Link>
+            </div>
+
             {resultUrls.length > 0 && (
               <div className="mt-3 flex flex-wrap gap-2">
                 {resultUrls.map((url, i) => (
@@ -160,7 +247,9 @@ export function TaskList({ initialTasks }: { initialTasks: Task[] }) {
             )}
           </div>
         );
-      })}
+          })}
+        </div>
+      )}
     </div>
   );
 }

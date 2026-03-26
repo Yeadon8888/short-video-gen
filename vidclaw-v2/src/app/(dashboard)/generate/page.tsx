@@ -1,473 +1,218 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { Send, Upload, X, Film, Zap, CalendarClock } from "lucide-react";
-import { useGenerateStore, type PollResult } from "@/stores/generate";
+import Link from "next/link";
+import { useState } from "react";
+import { CalendarClock, Zap } from "lucide-react";
+import { useGenerateStore } from "@/stores/generate";
+import { GenerateFormPanels } from "@/components/generate/GenerateFormPanels";
+import { GenerateIdleCards } from "@/components/generate/GenerateIdleCards";
 import { ParamBar } from "@/components/generate/ParamBar";
 import { ProcessLog } from "@/components/generate/ProcessLog";
 import { ScriptOutput } from "@/components/generate/ScriptOutput";
 import { VideoResults } from "@/components/generate/VideoResults";
-
-interface SSEEvent {
-  type: string;
-  message?: string;
-  stage?: string;
-  data?: unknown;
-  urls?: string[];
-  code?: string;
-  sora_prompt?: string;
-  taskIds?: string[];
-}
-
-const VIDEO_URL_PATTERN =
-  /https?:\/\/[^\s<>"']*(?:douyin|tiktok|v\.douyin)[^\s<>"']*/i;
+import {
+  GENERATE_SOURCE_LABELS,
+  GENERATE_TABS,
+  type BatchSummary,
+  type GenerateTab,
+  type PendingVideo,
+} from "@/components/generate/generate-config";
+import { GenerateTabs } from "@/components/generate/GenerateTabs";
+import { useGeneratePreset } from "@/components/generate/useGeneratePreset";
+import { useGenerateRunner } from "@/components/generate/useGenerateRunner";
+import { useVideoUpload } from "@/components/generate/useVideoUpload";
+import type {
+  BatchGenerateRequest,
+  GenerateRequest,
+} from "@/lib/video/types";
 
 export default function GeneratePage() {
-  const [input, setInput] = useState("");
-  const [pendingVideo, setPendingVideo] = useState<{ url: string; name: string; sizeMB: string } | null>(null);
+  const [activeTab, setActiveTab] = useState<GenerateTab>("theme");
+  const [themeInput, setThemeInput] = useState("");
+  const [themeBrief, setThemeBrief] = useState("");
+  const [urlInput, setUrlInput] = useState("");
+  const [urlBrief, setUrlBrief] = useState("");
+  const [uploadBrief, setUploadBrief] = useState("");
+  const [batchTheme, setBatchTheme] = useState("");
+  const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
+  const [batchImageIds, setBatchImageIds] = useState<string[]>([]);
   const [scheduled, setScheduled] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const pollingRef = useRef(false);
-  const abortRef = useRef<AbortController | null>(null);
-
-  // Cancel all in-flight requests when component unmounts
-  useEffect(() => {
-    return () => {
-      abortRef.current?.abort();
-      pollingRef.current = false;
-    };
-  }, []);
+  const [pendingVideo, setPendingVideo] = useState<PendingVideo | null>(null);
+  const [batchSummary, setBatchSummary] = useState<BatchSummary | null>(null);
 
   const stage = useGenerateStore((s) => s.stage);
   const errorMessage = useGenerateStore((s) => s.errorMessage);
   const reset = useGenerateStore((s) => s.reset);
-  const setStage = useGenerateStore((s) => s.setStage);
-  const addLog = useGenerateStore((s) => s.addLog);
-  const setScript = useGenerateStore((s) => s.setScript);
-  const setVideoUrls = useGenerateStore((s) => s.setVideoUrls);
-  const setError = useGenerateStore((s) => s.setError);
-  const setPollResults = useGenerateStore((s) => s.setPollResults);
   const params = useGenerateStore((s) => s.params);
+  const setParams = useGenerateStore((s) => s.setParams);
 
-  const isLoading = !["IDLE", "DONE", "ERROR"].includes(stage);
+  useGeneratePreset({
+    setActiveTab,
+    setThemeInput,
+    setThemeBrief,
+    setUrlInput,
+    setUrlBrief,
+    setUploadBrief,
+    setBatchTheme,
+    setSelectedImageIds,
+    setBatchImageIds,
+    setPendingVideo,
+    setParams,
+  });
 
-  async function startGenerate(body: {
-    type: "theme" | "video_key" | "url";
-    input: string;
-    modification?: string;
-  }) {
-    // Abort any previous in-flight generation
-    abortRef.current?.abort();
-    const ac = new AbortController();
-    abortRef.current = ac;
+  const { isLoading, startBatchGenerate, startStreamGenerate } = useGenerateRunner({
+    onBatchSummaryChange: setBatchSummary,
+  });
+  const { fileInputRef, handleVideoFile } = useVideoUpload({
+    onBeforeUpload: () => setBatchSummary(null),
+    onUploaded: setPendingVideo,
+  });
 
-    reset();
-    setStage("ANALYZE");
-    pollingRef.current = false;
-
-    try {
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...body, params, scheduled }),
-        signal: ac.signal,
-      });
-
-      if (!res.ok) {
-        setError("HTTP_ERROR", `请求失败: HTTP ${res.status}`);
-        return;
-      }
-
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const json = line.slice(6).trim();
-          if (!json) continue;
-
-          let event: SSEEvent;
-          try {
-            event = JSON.parse(json);
-          } catch {
-            continue;
-          }
-
-          if (event.type === "stage") {
-            setStage(event.stage as typeof stage);
-          } else if (event.type === "log") {
-            addLog(event.message ?? "");
-          } else if (event.type === "script") {
-            setScript(event.data as Parameters<typeof setScript>[0]);
-          } else if (event.type === "videos") {
-            setVideoUrls(event.urls ?? []);
-          } else if (event.type === "tasks") {
-            const taskIds = event.taskIds ?? [];
-            if (taskIds.length > 0) {
-              pollingRef.current = true;
-              setStage("POLL");
-              addLog(`任务已提交: ${taskIds.join(", ").slice(0, 60)}`);
-              pollSoraTasks(taskIds, event.sora_prompt);
-            }
-          } else if (event.type === "error") {
-            setError(
-              event.code ?? "UNKNOWN",
-              event.message ?? "未知错误",
-              event.sora_prompt
-            );
-          } else if (event.type === "done") {
-            if (!pollingRef.current) {
-              setStage("DONE");
-            }
-          }
-        }
-      }
-    } catch (e) {
-      if (e instanceof DOMException && e.name === "AbortError") return;
-      setError("NETWORK", String(e));
-      pollingRef.current = false;
-    }
-  }
-
-  async function pollSoraTasks(taskIds: string[], soraPrompt?: string) {
-    const POLL_INTERVAL = 15_000;
-    const MAX_POLLS = 40;
-    const STALE_LIMIT = 5;
-    const signal = abortRef.current?.signal;
-
-    let lastProgressKey = "";
-    let staleCount = 0;
-
-    for (let poll = 0; poll < MAX_POLLS; poll++) {
-      if (signal?.aborted) return;
-      await new Promise((r) => setTimeout(r, POLL_INTERVAL));
-      if (signal?.aborted) return;
-
-      try {
-        const res = await fetch(
-          `/api/generate/status?taskIds=${encodeURIComponent(taskIds.join(","))}`,
-          { signal }
-        );
-        if (!res.ok) {
-          addLog(`[轮询] #${poll + 1} 失败: HTTP ${res.status}`);
-          continue;
-        }
-
-        const data = await res.json();
-        const results = data.results as PollResult[];
-        setPollResults(results);
-
-        for (const r of results) {
-          addLog(
-            `[轮询] ${r.taskId.slice(0, 14)}... 状态=${r.status} 进度=${r.progress}`
-          );
-        }
-
-        if (data.allDone) {
-          const successUrls = results
-            .filter((r) => r.status === "SUCCESS" && r.url)
-            .map((r) => r.url!);
-
-          if (successUrls.length > 0) {
-            setVideoUrls(successUrls);
-            setStage("DONE");
-          } else {
-            const reasons = results
-              .filter((r) => r.status === "FAILED")
-              .map((r) => r.failReason ?? "未知原因")
-              .join("; ");
-            setError("SORA_FAILED", `视频生成失败: ${reasons}`, soraPrompt);
-          }
-          pollingRef.current = false;
-          return;
-        }
-
-        const currentKey = results
-          .map((r) => `${r.taskId}:${r.status}:${r.progress}`)
-          .join("|");
-        const maxProgress = Math.max(
-          ...results.map((r) => parseInt(r.progress) || 0)
-        );
-
-        if (currentKey === lastProgressKey) {
-          if (maxProgress < 80) staleCount++;
-          if (staleCount >= STALE_LIMIT) {
-            setError(
-              "POLL_STALE",
-              `视频生成进度停滞，请检查任务后台。`,
-              soraPrompt
-            );
-            pollingRef.current = false;
-            return;
-          }
-        } else {
-          staleCount = 0;
-          lastProgressKey = currentKey;
-        }
-      } catch (e) {
-        if (e instanceof DOMException && e.name === "AbortError") return;
-        addLog(`[轮询] 异常: ${String(e).slice(0, 100)}`);
-      }
-    }
-
-    if (signal?.aborted) return;
-    setError("POLL_TIMEOUT", "视频生成超时，请检查任务后台。", soraPrompt);
-    pollingRef.current = false;
-  }
-
-  function handleSend() {
-    const text = input.trim();
+  function handleSubmit() {
     if (isLoading) return;
 
-    // Video remix mode: pending video uploaded
-    if (pendingVideo) {
-      const modification = text || undefined;
-      setInput("");
-      const videoUrl = pendingVideo.url;
-      setPendingVideo(null);
-      startGenerate({
-        type: "video_key",
-        input: videoUrl,
-        modification,
-      });
+    if (activeTab === "theme") {
+      if (!themeInput.trim()) return;
+      const request: GenerateRequest = {
+        type: "theme",
+        input: themeInput.trim(),
+        creativeBrief: themeBrief.trim() || undefined,
+        sourceMode: "theme",
+        selectedImageIds,
+        params,
+        scheduled,
+      };
+      void startStreamGenerate(request);
       return;
     }
 
-    if (!text) return;
-    setInput("");
-
-    const isUrl = VIDEO_URL_PATTERN.test(text);
-    startGenerate({
-      type: isUrl ? "url" : "theme",
-      input: text,
-    });
-  }
-
-  async function handleVideoFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (fileInputRef.current) fileInputRef.current.value = "";
-
-    // Upload the video first, then wait for user to confirm
-    reset();
-    setStage("DOWNLOAD");
-    addLog("正在上传视频...");
-
-    try {
-      // Step 1: get direct-upload token from server (small JSON request)
-      const tokenRes = await fetch("/api/assets/upload-token", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          filename: file.name,
-          contentType: file.type,
-        }),
-      });
-      if (!tokenRes.ok) {
-        setError("UPLOAD_FAILED", `获取上传凭证失败: HTTP ${tokenRes.status}`);
-        return;
-      }
-      const { uploadUrl, apiKey } = await tokenRes.json();
-
-      // Step 2: upload directly to Cloudflare Worker (bypasses Vercel 4.5 MB limit)
-      const directRes = await fetch(uploadUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": file.type || "video/mp4",
-          "X-Upload-Key": apiKey,
-        },
-        body: file,
-      });
-      if (!directRes.ok) {
-        setError("UPLOAD_FAILED", `视频上传失败: HTTP ${directRes.status}`);
-        return;
-      }
-      const r2Result = await directRes.json();
-
-      // Step 3: register asset in DB (small JSON request)
-      const regRes = await fetch("/api/assets/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          key: r2Result.key,
-          url: r2Result.url,
-          size: r2Result.size,
-          filename: file.name,
-          contentType: file.type,
-        }),
-      });
-      if (!regRes.ok) {
-        setError("UPLOAD_FAILED", `注册资源失败: HTTP ${regRes.status}`);
-        return;
-      }
-      const asset = await regRes.json();
-
-      const sizeMB = (file.size / 1024 / 1024).toFixed(1);
-      addLog(`视频已上传 (${sizeMB} MB)，请调整参数后点击发送`);
-
-      // Store pending video — don't start generation yet
-      setPendingVideo({ url: asset.url, name: file.name, sizeMB });
-      setStage("IDLE");
-    } catch (err) {
-      setError("UPLOAD_FAILED", String(err));
+    if (activeTab === "url") {
+      if (!urlInput.trim()) return;
+      const request: GenerateRequest = {
+        type: "url",
+        input: urlInput.trim(),
+        creativeBrief: urlBrief.trim() || undefined,
+        sourceMode: "url",
+        selectedImageIds,
+        params,
+        scheduled,
+      };
+      void startStreamGenerate(request);
+      return;
     }
+
+    if (activeTab === "upload") {
+      if (!pendingVideo) return;
+      const request: GenerateRequest = {
+        type: "video_key",
+        input: pendingVideo.url,
+        creativeBrief: uploadBrief.trim() || undefined,
+        sourceMode: "upload",
+        selectedImageIds,
+        params,
+        scheduled,
+      };
+      void startStreamGenerate(request);
+      return;
+    }
+
+    if (!batchTheme.trim()) return;
+    const request: BatchGenerateRequest = {
+      sourceMode: "batch",
+      batchTheme: batchTheme.trim(),
+      selectedImageIds: batchImageIds,
+      selectionMode: "sequence",
+      params,
+    };
+    void startBatchGenerate(request);
   }
 
-  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
+  function isSubmitDisabled() {
+    if (isLoading) return true;
+    if (activeTab === "theme") return !themeInput.trim();
+    if (activeTab === "url") return !urlInput.trim();
+    if (activeTab === "upload") return !pendingVideo;
+    return !batchTheme.trim() || batchImageIds.length === 0;
   }
+
+  const activeSourceLabel = GENERATE_SOURCE_LABELS[activeTab];
 
   return (
-    <div className="mx-auto max-w-4xl space-y-8">
-      {/* ═══ Title ═══ */}
-      <div className="pt-4 text-center sm:pt-8 space-y-4">
+    <div className="mx-auto max-w-5xl space-y-8">
+      <div className="space-y-4 pt-4 text-center sm:pt-8">
         <h1 className="text-4xl font-black tracking-tight md:text-6xl">
           <span className="bg-gradient-to-r from-white via-slate-200 to-[var(--vc-accent)] bg-clip-text text-transparent">
             AI 驱动的带货短视频
           </span>
         </h1>
-        <p className="text-lg text-slate-400">粘贴链接、上传视频或描述主题，AI 一键出片</p>
+        <p className="text-lg text-slate-400">四种工作流，一页切换，直接对应真实带货场景</p>
       </div>
 
-      {/* ═══ Main Input Card ═══ */}
-      <div className="rounded-xl border border-[var(--vc-border)] bg-[var(--vc-bg-surface)] p-2 shadow-2xl">
-        {/* Input area */}
-        <div className="flex items-start gap-4 p-4" style={{ minHeight: 160 }}>
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isLoading}
-            className="mt-2 shrink-0 text-[var(--vc-accent)] transition-all duration-150 hover:scale-110 disabled:opacity-40"
-            title="上传视频进行二创"
-          >
-            <Upload className="h-7 w-7" />
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="video/*"
-            className="hidden"
-            onChange={handleVideoFile}
-          />
+      <div className="space-y-4 rounded-[var(--vc-radius-xl)] border border-[var(--vc-border)] bg-[var(--vc-bg-surface)] p-4 shadow-2xl">
+        <GenerateTabs tabs={GENERATE_TABS} activeTab={activeTab} onChange={setActiveTab} />
 
-          <div className="flex-1">
-            {pendingVideo && (
-              <div className="mb-2 flex items-center gap-2 rounded-full bg-[var(--vc-accent)]/10 px-3 py-1.5">
-                <Film className="h-4 w-4 shrink-0 text-[var(--vc-accent)]" />
-                <span className="truncate text-sm text-[var(--vc-accent)]">
-                  {pendingVideo.name} ({pendingVideo.sizeMB} MB)
-                </span>
-                <button
-                  onClick={() => setPendingVideo(null)}
-                  className="ml-auto shrink-0 rounded-full p-1 text-[var(--vc-accent)]/60 transition-colors hover:bg-[var(--vc-accent)]/20 hover:text-[var(--vc-accent)]"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            )}
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={pendingVideo ? "输入修改提示（可选），然后点击发送..." : "粘贴抖音/TikTok 链接，或输入创意主题..."}
-              rows={3}
-              disabled={isLoading}
-              className="h-32 w-full resize-none bg-transparent text-xl text-slate-100 placeholder-slate-600 outline-none md:text-2xl"
-            />
-          </div>
+        <div className="border-t border-[var(--vc-border)]/60 pt-4">
+          <GenerateFormPanels
+            activeTab={activeTab}
+            isLoading={isLoading}
+            fileInputRef={fileInputRef}
+            pendingVideo={pendingVideo}
+            themeInput={themeInput}
+            themeBrief={themeBrief}
+            urlInput={urlInput}
+            urlBrief={urlBrief}
+            uploadBrief={uploadBrief}
+            batchTheme={batchTheme}
+            selectedImageIds={selectedImageIds}
+            batchImageIds={batchImageIds}
+            onThemeInputChange={setThemeInput}
+            onThemeBriefChange={setThemeBrief}
+            onUrlInputChange={setUrlInput}
+            onUrlBriefChange={setUrlBrief}
+            onUploadBriefChange={setUploadBrief}
+            onBatchThemeChange={setBatchTheme}
+            onSelectedImageIdsChange={setSelectedImageIds}
+            onBatchImageIdsChange={setBatchImageIds}
+            onVideoFileChange={handleVideoFile}
+            onPendingVideoClear={() => setPendingVideo(null)}
+          />
         </div>
 
-        {/* Params bar + Generate button */}
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[var(--vc-border)]/50 p-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <ParamBar />
-          </div>
+        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[var(--vc-border)]/60 pt-4">
+          <ParamBar />
           <div className="flex items-center gap-3">
-            {/* Scheduled toggle */}
+            {activeTab !== "batch" && (
+              <button
+                onClick={() => setScheduled((value) => !value)}
+                disabled={isLoading}
+                className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-all ${
+                  scheduled
+                    ? "border-purple-500/40 bg-purple-500/10 text-purple-300"
+                    : "border-[var(--vc-border)] text-[var(--vc-text-muted)] hover:border-purple-500/30 hover:text-purple-300"
+                }`}
+              >
+                <CalendarClock className="h-3.5 w-3.5" />
+                定时托管
+              </button>
+            )}
             <button
-              onClick={() => setScheduled((p) => !p)}
-              disabled={isLoading}
-              className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-all ${
-                scheduled
-                  ? "border-purple-500/40 bg-purple-500/10 text-purple-300"
-                  : "border-[var(--vc-border)] text-[var(--vc-text-muted)] hover:border-purple-500/30 hover:text-purple-300"
-              }`}
-              title="开启后任务将在凌晨 2:00 自动执行（成功率更高）"
-            >
-              <CalendarClock className="h-3.5 w-3.5" />
-              定时托管
-            </button>
-            <button
-              onClick={handleSend}
-              disabled={(!input.trim() && !pendingVideo) || isLoading}
-              className="vc-glow-btn flex items-center gap-2 px-8 py-3 text-sm"
+              onClick={handleSubmit}
+              disabled={isSubmitDisabled()}
+              className="vc-glow-btn inline-flex items-center gap-2 px-8 py-3 text-sm"
             >
               <Zap className="h-4 w-4" />
-              {scheduled ? "定时生成" : "生成"}
+              {activeTab === "batch" ? "创建批量任务" : scheduled ? "定时生成" : "生成"}
             </button>
           </div>
         </div>
       </div>
 
-      {/* ═══ Quick Examples ═══ */}
-      {stage === "IDLE" && !errorMessage && (
-        <div className="space-y-6">
-          {/* Example cards */}
-          <div className="grid gap-3 sm:grid-cols-3">
-            {[
-              { title: "🔗 链接二创", desc: "粘贴抖音/TikTok 视频链接" },
-              { title: "📁 上传视频", desc: "上传本地视频进行 AI 二创" },
-              { title: "✨ 主题生产", desc: "描述产品主题，从零生成" },
-            ].map(({ title, desc }) => (
-              <button
-                key={title}
-                className="group rounded-xl border border-white/5 bg-[var(--vc-bg-surface)] p-5 text-left transition-all duration-300 hover:border-[var(--vc-accent)]/30"
-                onClick={() => {
-                  if (title.includes("上传")) {
-                    fileInputRef.current?.click();
-                  }
-                }}
-              >
-                <div className="text-sm font-bold text-white">{title}</div>
-                <div className="mt-1 text-sm text-slate-400">{desc}</div>
-              </button>
-            ))}
-          </div>
-
-          {/* 3-step flow */}
-          <div className="grid gap-8 border-t border-[var(--vc-border)] pt-12 pb-8 md:grid-cols-3">
-            {[
-              { step: "01", title: "链接 / 主题", desc: "粘贴视频链接或输入产品主题，开始创作" },
-              { step: "02", title: "AI 分析", desc: "Gemini 深度理解画面内容，生成英文脚本", active: false },
-              { step: "03", title: "视频出片", desc: "VEO 3.1 / Sora 生成视频，自动配套文案", active: false },
-            ].map(({ step, title, desc, active }, i) => (
-              <div key={step} className={i > 0 ? "opacity-50" : ""}>
-                <div className="flex items-center gap-3">
-                  <span className="text-3xl font-black text-[var(--vc-accent)]/30">{step}</span>
-                  <div className="h-px flex-1 bg-[var(--vc-border)]" />
-                </div>
-                <h3 className="mt-4 font-bold text-slate-200">{title}</h3>
-                <p className="mt-1 text-sm text-slate-500">{desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
+      {stage === "IDLE" && !errorMessage && !batchSummary && (
+        <GenerateIdleCards tabs={GENERATE_TABS} />
       )}
 
-      {/* ═══ Error ═══ */}
       {errorMessage && (
-        <div className="vc-animate-in rounded-xl border border-red-500/25 bg-red-500/5 px-4 py-3 text-sm text-red-400">
+        <div className="rounded-xl border border-red-500/25 bg-red-500/5 px-4 py-3 text-sm text-red-400">
           {errorMessage}
           <button
             onClick={reset}
@@ -478,13 +223,36 @@ export default function GeneratePage() {
         </div>
       )}
 
-      {/* ═══ Process Log ═══ */}
+      {batchSummary && (
+        <div className="vc-card space-y-4 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-white">{activeSourceLabel}已创建</h2>
+              <p className="text-sm text-[var(--vc-text-muted)]">
+                成功 {batchSummary.createdCount} 条，失败 {batchSummary.failedCount} 条
+              </p>
+            </div>
+            <Link
+              href={batchSummary.taskGroupId ? `/tasks/groups/${batchSummary.taskGroupId}` : "/tasks"}
+              className="rounded-full border border-[var(--vc-border)] px-4 py-2 text-sm text-[var(--vc-text-secondary)]"
+            >
+              查看任务组
+            </Link>
+          </div>
+          {batchSummary.errors.length > 0 && (
+            <div className="space-y-2 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-200">
+              {batchSummary.errors.map((error) => (
+                <p key={`${error.index}-${error.message}`}>
+                  第 {error.index} 条：{error.message}
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <ProcessLog />
-
-      {/* ═══ Script Output ═══ */}
       <ScriptOutput />
-
-      {/* ═══ Video Results ═══ */}
       <VideoResults />
     </div>
   );
