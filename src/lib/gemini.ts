@@ -4,6 +4,7 @@
  */
 
 import type { ScriptResult } from "@/lib/video/types";
+import { buildScriptInstruction } from "@/lib/video/prompt";
 
 const GEMINI_MODEL = "gemini-3.1-pro-preview";
 const DEFAULT_BASE_URL = "https://yunwu.ai";
@@ -129,6 +130,7 @@ export async function generateScript(params: {
   mimeType?: string;
   theme?: string;
   modification?: string;
+  creativeBrief?: string;
   imageBuffers?: { buffer: ArrayBuffer; mimeType: string }[];
   promptTemplate?: string;
   platform?: "douyin" | "tiktok";
@@ -139,6 +141,7 @@ export async function generateScript(params: {
     mimeType,
     theme,
     modification,
+    creativeBrief,
     imageBuffers,
     promptTemplate,
     platform,
@@ -154,21 +157,32 @@ export async function generateScript(params: {
   if (promptTemplate) {
     instruction = promptTemplate
       .replace(/\{\{THEME\}\}/g, theme ?? "")
-      .replace(/\{\{MODIFICATION_PROMPT\}\}/g, modification ?? "");
+      .replace(/\{\{MODIFICATION_PROMPT\}\}/g, modification ?? creativeBrief ?? "")
+      .replace(/\{\{CREATIVE_BRIEF\}\}/g, creativeBrief ?? modification ?? "");
     if (!instruction.includes('"full_sora_prompt"')) {
       instruction += JSON_OUTPUT_SUFFIX;
     }
     instruction += platformInstruction;
   } else {
-    instruction = buildDefaultPrompt(type, theme, modification) + platformInstruction;
+    instruction = buildDefaultPrompt(type, theme, modification, creativeBrief) + platformInstruction;
   }
+  instruction = buildScriptInstruction({
+    baseInstruction: instruction,
+    referenceImageCount: imageBuffers?.length ?? 0,
+    creativeBrief,
+  });
 
   // Build content parts
   const parts: unknown[] = [];
 
   // Reference images as inline_data
   if (imageBuffers && imageBuffers.length > 0) {
-    parts.push({ text: "参考图片（产品图/风格参考）：" });
+    parts.push({
+      text:
+        imageBuffers.length > 1
+          ? "以下是产品参考图片。它们代表同一商品的不同角度/细节，最终视频必须保留这组图片对应的商品身份与外观："
+          : "以下是产品参考图片。最终视频必须保留这张图对应的商品身份与外观：",
+    });
     for (const img of imageBuffers) {
       const b64 = Buffer.from(img.buffer).toString("base64");
       parts.push({ inline_data: { mime_type: img.mimeType, data: b64 } });
@@ -227,6 +241,7 @@ function buildDefaultPrompt(
   type: "video" | "theme",
   theme?: string,
   modification?: string,
+  creativeBrief?: string,
 ): string {
   const jsonSchema = `{
   "creative_points": ["创意要点1", "创意要点2"],
@@ -262,5 +277,9 @@ function buildDefaultPrompt(
     return `你是一位专业的短视频创作专家和 Sora 脚本生成师。\n${modSection}\n\n请分析这段视频（和参考图片，如有），输出一个 **严格合法的 JSON 对象**，格式如下：\n\n${jsonSchema}\n\n${constraints}`;
   }
 
-  return `你是一位专业的短视频创作专家和 Sora 脚本生成师。\n\n主题：${theme}\n\n基于以上主题，输出一个 **严格合法的 JSON 对象**，格式如下：\n\n${jsonSchema}\n\n${constraints}`;
+  const briefSection = creativeBrief
+    ? `\n补充要求：${creativeBrief}\n请把这些要求具体落实到分镜、画面和文案里。`
+    : "";
+
+  return `你是一位专业的短视频创作专家和 Sora 脚本生成师。\n\n主题：${theme}${briefSection}\n\n基于以上主题，输出一个 **严格合法的 JSON 对象**，格式如下：\n\n${jsonSchema}\n\n${constraints}`;
 }

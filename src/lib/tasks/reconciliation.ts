@@ -2,6 +2,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { creditTxns, tasks, users } from "@/lib/db/schema";
 import type { Task } from "@/lib/db/schema";
+import { recomputeTaskGroupSummary } from "@/lib/tasks/groups";
 
 export const ACTIVE_TASK_STATUSES = [
   "pending",
@@ -144,7 +145,7 @@ export async function finalizeTaskIfTerminal(params: {
 
   const allowedStatuses = params.allowedStatuses ?? ACTIVE_TASK_STATUSES;
 
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const [updatedTask] = await tx
       .update(tasks)
       .set({
@@ -160,10 +161,10 @@ export async function finalizeTaskIfTerminal(params: {
           inArray(tasks.status, [...allowedStatuses]),
         ),
       )
-      .returning({ id: tasks.id });
+      .returning({ id: tasks.id, taskGroupId: tasks.taskGroupId });
 
     if (!updatedTask) {
-      return { updated: false, settlement };
+      return { updated: false, settlement, taskGroupId: null as string | null };
     }
 
     if (settlement.refundAmount > 0) {
@@ -186,8 +187,14 @@ export async function finalizeTaskIfTerminal(params: {
       });
     }
 
-    return { updated: true, settlement };
+    return { updated: true, settlement, taskGroupId: updatedTask.taskGroupId };
   });
+
+  if (result.updated && result.taskGroupId) {
+    await recomputeTaskGroupSummary(result.taskGroupId);
+  }
+
+  return { updated: result.updated, settlement: result.settlement };
 }
 
 export async function failTaskAndRefund(params: {
@@ -200,7 +207,7 @@ export async function failTaskAndRefund(params: {
 }): Promise<boolean> {
   const allowedStatuses = params.allowedStatuses ?? ACTIVE_TASK_STATUSES;
 
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const [updatedTask] = await tx
       .update(tasks)
       .set({
@@ -215,9 +222,9 @@ export async function failTaskAndRefund(params: {
           inArray(tasks.status, [...allowedStatuses]),
         ),
       )
-      .returning({ id: tasks.id });
+      .returning({ id: tasks.id, taskGroupId: tasks.taskGroupId });
 
-    if (!updatedTask) return false;
+    if (!updatedTask) return { updated: false, taskGroupId: null as string | null };
 
     if (params.refundAmount > 0) {
       const [creditedUser] = await tx
@@ -236,6 +243,12 @@ export async function failTaskAndRefund(params: {
       });
     }
 
-    return true;
+    return { updated: true, taskGroupId: updatedTask.taskGroupId };
   });
+
+  if (result.updated && result.taskGroupId) {
+    await recomputeTaskGroupSummary(result.taskGroupId);
+  }
+
+  return result.updated;
 }

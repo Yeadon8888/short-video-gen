@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { tasks, taskItems } from "@/lib/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { taskGroups, taskItems, tasks } from "@/lib/db/schema";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import {
   ACTIVE_TASK_STATUSES,
   finalizeTaskIfTerminal,
@@ -22,16 +22,16 @@ export async function GET() {
   if (authResult instanceof NextResponse) return authResult;
   const { user } = authResult;
 
-  // Fetch all user tasks
-  let userTasks = await db
+  // Fetch all user tasks for provider polling, including tasks inside groups.
+  const allUserTasks = await db
     .select()
     .from(tasks)
     .where(eq(tasks.userId, user.id))
     .orderBy(desc(tasks.createdAt))
-    .limit(50);
+    .limit(200);
 
   // Find tasks that are still active
-  const activeTasks = userTasks.filter((t) =>
+  const activeTasks = allUserTasks.filter((t) =>
     (ACTIVE_TASK_STATUSES as readonly string[]).includes(t.status),
   );
 
@@ -93,14 +93,19 @@ export async function GET() {
   }
 
   // Re-fetch the final task list
-  if (activeTasks.length > 0) {
-    userTasks = await db
-      .select()
-      .from(tasks)
-      .where(eq(tasks.userId, user.id))
-      .orderBy(desc(tasks.createdAt))
-      .limit(50);
-  }
+  const userTasks = await db
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.userId, user.id), isNull(tasks.taskGroupId)))
+    .orderBy(desc(tasks.createdAt))
+    .limit(50);
 
-  return NextResponse.json({ tasks: userTasks });
+  const userTaskGroups = await db
+    .select()
+    .from(taskGroups)
+    .where(eq(taskGroups.userId, user.id))
+    .orderBy(desc(taskGroups.createdAt))
+    .limit(30);
+
+  return NextResponse.json({ tasks: userTasks, taskGroups: userTaskGroups });
 }

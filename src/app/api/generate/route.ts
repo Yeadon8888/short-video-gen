@@ -7,14 +7,16 @@ import {
   loadUserPrompts,
 } from "@/lib/storage/gateway";
 import type { VideoParams, GenerateRequest } from "@/lib/video/types";
+import { buildFinalVideoPrompt } from "@/lib/video/prompt";
+import { resolveSelectedImageAssets } from "@/lib/generate/assets";
 import {
   isTikHubEnabled,
   extractUrl,
   downloadVideoFromUrl,
 } from "@/lib/tikhub";
 import { db } from "@/lib/db";
-import { tasks, taskItems, creditTxns, users, models, userAssets } from "@/lib/db/schema";
-import { eq, sql, and, desc } from "drizzle-orm";
+import { tasks, taskItems, creditTxns, users } from "@/lib/db/schema";
+import { eq, sql, and } from "drizzle-orm";
 import { failTaskAndRefund } from "@/lib/tasks/reconciliation";
 import {
   createVideoTasks,
@@ -22,6 +24,7 @@ import {
 } from "@/lib/video/service";
 
 export const maxDuration = 300; // Vercel max
+const MAX_REFERENCE_IMAGES = 4;
 
 function sseData(obj: unknown): string {
   return `data: ${JSON.stringify(obj)}\n\n`;
@@ -44,7 +47,20 @@ export async function POST(req: NextRequest) {
   const { user } = authResult;
 
   const body = (await req.json()) as GenerateRequest;
-  const { type, input, modification, params, scheduled } = body;
+  const {
+    type,
+    input,
+    modification,
+    creativeBrief,
+    sourceMode,
+    selectedImageIds,
+    params,
+    scheduled,
+  } = body;
+  const effectiveSourceMode =
+    sourceMode ?? (type === "video_key" ? "upload" : type);
+  const effectiveCreativeBrief = creativeBrief?.trim() || modification?.trim() || undefined;
+  const normalizedSelectedImageIds = selectedImageIds?.slice(0, 1);
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -77,21 +93,24 @@ export async function POST(req: NextRequest) {
         log(`用户 ${user.email} | 余额 ${user.credits} | 本次消耗 ${totalCost} 积分`);
 
         // ── Step 1: Get user reference images (from DB, newest first) ──
-        let imageUrls: string[] = [];
-        const dbAssets = await db
-          .select({ url: userAssets.url })
-          .from(userAssets)
-          .where(and(eq(userAssets.userId, user.id), eq(userAssets.type, "image")))
-          .orderBy(desc(userAssets.createdAt))
-          .limit(10);
-        imageUrls = dbAssets.map((a) => a.url);
-        log(`参考图 ${imageUrls.length} 张`);
+        const selectedAssets = await resolveSelectedImageAssets({
+          userId: user.id,
+          selectedImageIds: normalizedSelectedImageIds,
+          fallbackLimit: 1,
+        });
+        const imageUrls = selectedAssets.map((asset) => asset.url);
+        const referenceImageUrls = imageUrls.slice(0, MAX_REFERENCE_IMAGES);
+        log(
+          normalizedSelectedImageIds?.length
+            ? `已选择产品图 ${selectedAssets.length} 张，本次使用 ${referenceImageUrls.length} 张`
+            : `产品图 ${imageUrls.length} 张，本次使用 ${referenceImageUrls.length} 张`,
+        );
 
         if (imageUrls.length === 0) {
           send({
             type: "error",
             code: "REFERENCE_IMAGE_REQUIRED",
-            message: "请先上传至少 1 张参考图片，再开始生成视频。",
+            message: "请先上传至少 1 张产品图片，再开始生成视频。",
           });
           send({ type: "done" });
           controller.close();
@@ -141,7 +160,7 @@ export async function POST(req: NextRequest) {
         send({ type: "stage", stage: "ANALYZE", message: "Gemini 分析中..." });
 
         const imageBuffers: { buffer: ArrayBuffer; mimeType: string }[] = [];
-        for (const url of imageUrls.slice(0, 1)) {
+        for (const url of referenceImageUrls) {
           try {
             const fetched = await fetchAssetBuffer(url);
             imageBuffers.push({ buffer: fetched.buffer, mimeType: fetched.mimeType });
@@ -167,7 +186,8 @@ export async function POST(req: NextRequest) {
           videoBuffer: isVideoMode ? videoBuffer : undefined,
           mimeType: isVideoMode ? videoMime : undefined,
           theme: type === "theme" ? input : undefined,
-          modification,
+          modification: isVideoMode ? effectiveCreativeBrief : undefined,
+          creativeBrief: type === "theme" ? effectiveCreativeBrief : undefined,
           imageBuffers,
           promptTemplate,
           platform: params.platform,
@@ -191,12 +211,20 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        send({ type: "script", data: scriptResult });
+        const soraPrompt = buildFinalVideoPrompt({
+          scriptPrompt: scriptResult.full_sora_prompt,
+          referenceImageCount: referenceImageUrls.length,
+        });
+
+        send({
+          type: "script",
+          data: {
+            ...scriptResult,
+            full_sora_prompt: soraPrompt,
+          },
+        });
 
         // ── Step 4: Check if scheduled (deferred) mode ──
-        const soraPrompt =
-          scriptResult.full_sora_prompt +
-          " The product shown in the reference image must appear clearly and prominently in the video.";
 
         const count = Math.min(Math.max(params.count, 1), 10);
 
@@ -218,7 +246,11 @@ export async function POST(req: NextRequest) {
                 type: taskType as "theme" | "remix" | "url",
                 status: "scheduled",
                 modelId: modelRow?.id,
-                inputText: taskType === "remix" ? (modification || "视频二创") : input,
+                inputText:
+                  taskType === "remix"
+                    ? (effectiveCreativeBrief || "视频二创")
+                    : input,
+                videoSourceUrl: type === "url" || type === "video_key" ? input : null,
                 soraPrompt,
                 scriptJson: scriptResult,
                 creditsCost: totalCost,
@@ -229,7 +261,11 @@ export async function POST(req: NextRequest) {
                   count,
                   platform: params.platform ?? "douyin",
                   model: modelSlug,
-                  imageUrls: imageUrls.slice(0, 1),
+                  imageUrls: referenceImageUrls,
+                  sourceMode: effectiveSourceMode,
+                  creativeBrief: effectiveCreativeBrief,
+                  selectedImageIds: selectedAssets.map((asset) => asset.id),
+                  selectedAssets,
                 },
               })
               .returning();
@@ -296,7 +332,11 @@ export async function POST(req: NextRequest) {
               type: taskType as "theme" | "remix" | "url",
               status: "generating",
               modelId: modelRow?.id,
-              inputText: taskType === "remix" ? (modification || "视频二创") : input,
+              inputText:
+                taskType === "remix"
+                  ? (effectiveCreativeBrief || "视频二创")
+                  : input,
+              videoSourceUrl: type === "url" || type === "video_key" ? input : null,
               soraPrompt,
               scriptJson: scriptResult,
               creditsCost: totalCost,
@@ -306,6 +346,11 @@ export async function POST(req: NextRequest) {
                 count,
                 platform: params.platform ?? "douyin",
                 model: modelSlug,
+                imageUrls: referenceImageUrls,
+                sourceMode: effectiveSourceMode,
+                creativeBrief: effectiveCreativeBrief,
+                selectedImageIds: selectedAssets.map((asset) => asset.id),
+                selectedAssets,
               },
             })
             .returning();
@@ -334,7 +379,7 @@ export async function POST(req: NextRequest) {
         // ── Step 5: Submit Sora task ──
         const videoRequest = {
           prompt: soraPrompt,
-          imageUrls: imageUrls.slice(0, 1),
+          imageUrls: referenceImageUrls,
           orientation: params.orientation,
           duration: params.duration,
           count,
@@ -382,7 +427,7 @@ export async function POST(req: NextRequest) {
             type: "error",
             code: "SORA_UNAVAILABLE",
             message: userMessage,
-            sora_prompt: scriptResult.full_sora_prompt,
+            sora_prompt: soraPrompt,
           });
           send({ type: "done" });
           controller.close();

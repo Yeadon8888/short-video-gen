@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -23,7 +23,7 @@ interface SidebarProps {
 const userLinks = [
   { href: "/generate", label: "生成视频", icon: Clapperboard },
   { href: "/tasks", label: "任务历史", icon: History },
-  { href: "/assets", label: "参考图片", icon: ImageIcon },
+  { href: "/assets", label: "产品图片", icon: ImageIcon },
   { href: "/pricing", label: "积分充值", icon: Coins },
   { href: "/settings", label: "设置", icon: Settings },
 ];
