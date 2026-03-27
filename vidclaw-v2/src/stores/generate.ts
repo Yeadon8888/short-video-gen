@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { FulfillmentMode } from "@/lib/video/types";
 
 export interface ScriptResult {
   creative_points: string[];
@@ -44,6 +45,16 @@ export interface PollResult {
   failReason?: string;
 }
 
+export interface DeliveryProgress {
+  requestedCount: number;
+  successfulCount: number;
+  failedCount: number;
+  pendingCount: number;
+  isComplete: boolean;
+  successUrls: string[];
+  deliveryDeadlineAt: string | null;
+}
+
 interface GenerateState {
   stage: GenerateStage;
   logs: string[];
@@ -54,6 +65,11 @@ interface GenerateState {
   soraPrompt: string | null;
   pollResults: PollResult[];
 
+  /** db task ID returned after submission — used for fulfillment mode polling */
+  dbTaskId: string | null;
+  fulfillmentMode: FulfillmentMode;
+  deliveryProgress: DeliveryProgress | null;
+
   params: GenerateParams;
 
   setStage: (stage: GenerateStage) => void;
@@ -63,6 +79,9 @@ interface GenerateState {
   setError: (code: string, message: string, soraPrompt?: string) => void;
   setSoraPrompt: (prompt: string) => void;
   setPollResults: (results: PollResult[]) => void;
+  setDbTaskId: (id: string | null) => void;
+  setFulfillmentMode: (mode: FulfillmentMode) => void;
+  setDeliveryProgress: (progress: DeliveryProgress | null) => void;
   setParams: (params: Partial<GenerateParams>) => void;
   reset: () => void;
 }
@@ -84,6 +103,9 @@ export const useGenerateStore = create<GenerateState>((set) => ({
   errorCode: null,
   soraPrompt: null,
   pollResults: [],
+  dbTaskId: null,
+  fulfillmentMode: "standard",
+  deliveryProgress: null,
   params: defaultParams,
 
   setStage: (stage) => set({ stage }),
@@ -97,6 +119,9 @@ export const useGenerateStore = create<GenerateState>((set) => ({
     set({ stage: "ERROR", errorCode: code, errorMessage: message, soraPrompt: soraPrompt ?? null }),
   setSoraPrompt: (prompt) => set({ soraPrompt: prompt }),
   setPollResults: (results) => set({ pollResults: results }),
+  setDbTaskId: (id) => set({ dbTaskId: id }),
+  setFulfillmentMode: (mode) => set({ fulfillmentMode: mode }),
+  setDeliveryProgress: (progress) => set({ deliveryProgress: progress }),
   setParams: (partial) => set((s) => ({ params: { ...s.params, ...partial } })),
   reset: () =>
     set({
@@ -108,5 +133,8 @@ export const useGenerateStore = create<GenerateState>((set) => ({
       errorCode: null,
       soraPrompt: null,
       pollResults: [],
+      dbTaskId: null,
+      fulfillmentMode: "standard",
+      deliveryProgress: null,
     }),
 }));

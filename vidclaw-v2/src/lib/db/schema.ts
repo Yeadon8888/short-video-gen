@@ -31,6 +31,23 @@ export const creditTxnTypeEnum = pgEnum("credit_txn_type", [
   "adjust",   // 管理员手动调整
 ]);
 export const assetTypeEnum = pgEnum("asset_type", ["image", "video"]);
+export const fulfillmentModeEnum = pgEnum("fulfillment_mode", [
+  "standard",
+  "backfill_until_target",
+]);
+export const slotStatusEnum = pgEnum("slot_status", [
+  "pending",    // 等待首次提交
+  "submitted",  // 已提交给 provider，等待结果
+  "success",    // 已成功产出视频
+  "failed",     // 已耗尽重试，彻底失败
+]);
+export const terminalClassEnum = pgEnum("terminal_class", [
+  "content_policy",  // 内容审核，不可重试
+  "quota_exceeded",  // 配额耗尽，不可重试
+  "provider_error",  // provider 内部错误，可重试
+  "timeout",         // 超时，可重试
+  "unknown",         // 未知，保守重试
+]);
 
 // ─── Users ───
 
@@ -138,18 +155,60 @@ export const tasks = pgTable("tasks", {
   scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   completedAt: timestamp("completed_at", { withTimezone: true }),
+
+  // ─── Fulfillment fields ───
+  /** "standard" = current behavior; "backfill_until_target" = auto-retry until requestedCount met */
+  fulfillmentMode: fulfillmentModeEnum("fulfillment_mode").default("standard").notNull(),
+  /** Target number of successful videos (only meaningful when fulfillmentMode = backfill_until_target) */
+  requestedCount: integer("requested_count"),
+  /** Number of slots that have reached success status */
+  successfulCount: integer("successful_count").default(0).notNull(),
+  /** When the first attempt was submitted to the provider */
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  /** Deadline after which no more retries are triggered (3 hours after startedAt) */
+  deliveryDeadlineAt: timestamp("delivery_deadline_at", { withTimezone: true }),
 });
 
-// ─── Task Items (单个视频生成子任务) ───
+// ─── Task Slots (目标单元，一个 slot = 承诺交付一条视频) ───
+
+export const taskSlots = pgTable("task_slots", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  taskId: uuid("task_id").references(() => tasks.id, { onDelete: "cascade" }).notNull(),
+  /** Slot index within the task (0-based) */
+  slotIndex: integer("slot_index").notNull(),
+  status: slotStatusEnum("status").default("pending").notNull(),
+  /** Number of attempts made for this slot */
+  attemptCount: integer("attempt_count").default(0).notNull(),
+  /** The winning task_item id once this slot succeeds */
+  winnerItemId: uuid("winner_item_id"),
+  /** URL of the final delivered video */
+  resultUrl: text("result_url"),
+  /** Last failure reason for display */
+  lastFailReason: text("last_fail_reason"),
+  /** Last terminal class (drives retry decision) */
+  lastTerminalClass: terminalClassEnum("last_terminal_class"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+});
+
+// ─── Task Items (单个视频生成子任务，一个 item = 一次 provider 尝试) ───
 
 export const taskItems = pgTable("task_items", {
   id: uuid("id").primaryKey().defaultRandom(),
   taskId: uuid("task_id").references(() => tasks.id, { onDelete: "cascade" }).notNull(),
+  /** Which slot this attempt belongs to (null for standard mode tasks) */
+  slotId: uuid("slot_id").references(() => taskSlots.id, { onDelete: "cascade" }),
+  /** Attempt number within the slot (1-based). null for standard mode. */
+  attemptNo: integer("attempt_no"),
   providerTaskId: varchar("provider_task_id", { length: 255 }),
   status: varchar("status", { length: 50 }).default("PENDING").notNull(),
   progress: varchar("progress", { length: 20 }).default("0%"),
   resultUrl: text("result_url"),
   failReason: text("fail_reason"),
+  /** Whether this failure is retryable (set when status = FAILED) */
+  retryable: boolean("retryable"),
+  /** Classified failure category */
+  terminalClass: terminalClassEnum("terminal_class"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   completedAt: timestamp("completed_at", { withTimezone: true }),
 });
@@ -210,6 +269,8 @@ export type TaskGroup = typeof taskGroups.$inferSelect;
 export type NewTaskGroup = typeof taskGroups.$inferInsert;
 export type Task = typeof tasks.$inferSelect;
 export type NewTask = typeof tasks.$inferInsert;
+export type TaskSlot = typeof taskSlots.$inferSelect;
+export type NewTaskSlot = typeof taskSlots.$inferInsert;
 export type TaskItem = typeof taskItems.$inferSelect;
 export type CreditTxn = typeof creditTxns.$inferSelect;
 export type UserAsset = typeof userAssets.$inferSelect;

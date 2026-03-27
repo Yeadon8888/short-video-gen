@@ -1,23 +1,40 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { tasks, taskItems } from "@/lib/db/schema";
+import { tasks, taskItems, taskSlots } from "@/lib/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import {
   finalizeTaskIfTerminal,
   resolveStatusPollScope,
 } from "@/lib/tasks/reconciliation";
 import { queryVideoTaskStatus } from "@/lib/video/service";
+import {
+  advanceSlotOnResult,
+  expireDeadlineSlots,
+  getActiveProviderTaskIds,
+  getFulfillmentProgress,
+} from "@/lib/tasks/fulfillment";
 
 /**
- * GET /api/generate/status?taskIds=id1,id2
- * Poll Sora/VEO task status. Also updates DB task items.
+ * GET /api/generate/status
+ *
+ * Two modes depending on query params:
+ *   - ?taskIds=id1,id2          — legacy / standard mode (poll by providerTaskId)
+ *   - ?dbTaskId=uuid            — fulfillment mode (poll by db task id)
  */
 export async function GET(req: NextRequest) {
   const authResult = await requireAuth();
   if (authResult instanceof NextResponse) return authResult;
   const { user } = authResult;
 
+  const dbTaskIdParam = req.nextUrl.searchParams.get("dbTaskId");
+
+  // ── Fulfillment mode: poll by db task ID ──
+  if (dbTaskIdParam) {
+    return handleFulfillmentPoll(dbTaskIdParam, user.id);
+  }
+
+  // ── Standard mode: poll by providerTaskIds ──
   const taskIdsParam = req.nextUrl.searchParams.get("taskIds") ?? "";
   const providerTaskIds = [...new Set(taskIdsParam
     .split(",")
@@ -25,9 +42,15 @@ export async function GET(req: NextRequest) {
     .filter(Boolean))];
 
   if (providerTaskIds.length === 0) {
-    return NextResponse.json({ error: "Missing taskIds" }, { status: 400 });
+    return NextResponse.json({ error: "Missing taskIds or dbTaskId" }, { status: 400 });
   }
 
+  return handleStandardPoll(providerTaskIds, user.id);
+}
+
+// ─── Standard poll (unchanged behavior) ───────────────────────────────────
+
+async function handleStandardPoll(providerTaskIds: string[], userId: string) {
   const matchedItems = await db
     .select()
     .from(taskItems)
@@ -35,7 +58,7 @@ export async function GET(req: NextRequest) {
     .where(
       and(
         inArray(taskItems.providerTaskId, providerTaskIds),
-        eq(tasks.userId, user.id),
+        eq(tasks.userId, userId),
       ),
     );
 
@@ -60,7 +83,6 @@ export async function GET(req: NextRequest) {
           taskId,
         });
 
-        // Update task item in DB
         await db
           .update(taskItems)
           .set({
@@ -68,6 +90,8 @@ export async function GET(req: NextRequest) {
             progress: result.progress,
             resultUrl: result.url,
             failReason: result.failReason,
+            retryable: result.retryable,
+            terminalClass: result.terminalClass,
             ...(result.status === "SUCCESS" || result.status === "FAILED"
               ? { completedAt: new Date() }
               : {}),
@@ -90,12 +114,11 @@ export async function GET(req: NextRequest) {
     (r) => r.status === "SUCCESS" || r.status === "FAILED",
   );
 
-  // If all tasks are done, update the parent task status
   if (allDone) {
     const [parentTask] = await db
       .select({ id: tasks.id, creditsCost: tasks.creditsCost })
       .from(tasks)
-      .where(and(eq(tasks.id, scope.taskId), eq(tasks.userId, user.id)))
+      .where(and(eq(tasks.id, scope.taskId), eq(tasks.userId, userId)))
       .limit(1);
 
     if (parentTask) {
@@ -106,7 +129,7 @@ export async function GET(req: NextRequest) {
 
       await finalizeTaskIfTerminal({
         taskId: parentTask.id,
-        userId: user.id,
+        userId,
         creditsCost: parentTask.creditsCost,
         items: allItems,
       });
@@ -114,4 +137,92 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json({ results, allDone });
+}
+
+// ─── Fulfillment poll ──────────────────────────────────────────────────────
+
+async function handleFulfillmentPoll(dbTaskId: string, userId: string) {
+  const [task] = await db
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.id, dbTaskId), eq(tasks.userId, userId)))
+    .limit(1);
+
+  if (!task) {
+    return NextResponse.json({ error: "Task not found" }, { status: 404 });
+  }
+
+  // Expire deadline-overdue slots first
+  if (task.deliveryDeadlineAt) {
+    await expireDeadlineSlots(dbTaskId, task.deliveryDeadlineAt);
+  }
+
+  // Get currently active provider task IDs
+  const activeItems = await getActiveProviderTaskIds(dbTaskId);
+
+  // Poll each active item from provider
+  for (const { providerTaskId, slotId, itemId } of activeItems) {
+    try {
+      const result = await queryVideoTaskStatus({
+        modelId: task.modelId,
+        taskId: providerTaskId,
+      });
+
+      // Update task item
+      await db
+        .update(taskItems)
+        .set({
+          status: result.status,
+          progress: result.progress,
+          resultUrl: result.url,
+          failReason: result.failReason,
+          retryable: result.retryable,
+          terminalClass: result.terminalClass,
+          ...(result.status === "SUCCESS" || result.status === "FAILED"
+            ? { completedAt: new Date() }
+            : {}),
+        })
+        .where(eq(taskItems.id, itemId));
+
+      // Advance slot if terminal
+      if (result.status === "SUCCESS" || result.status === "FAILED") {
+        const [slot] = await db
+          .select()
+          .from(taskSlots)
+          .where(eq(taskSlots.id, slotId))
+          .limit(1);
+
+        if (slot) {
+          await advanceSlotOnResult({
+            task,
+            slot,
+            itemStatus: result.status as "SUCCESS" | "FAILED",
+            resultUrl: result.url,
+            failReason: result.failReason,
+            retryable: result.retryable,
+            terminalClass: result.terminalClass,
+          });
+        }
+      }
+    } catch {
+      // Provider query failed — skip
+    }
+  }
+
+  // Compute current progress
+  const requestedCount = task.requestedCount ?? (task.paramsJson as { count: number } | null)?.count ?? 0;
+  const progress = await getFulfillmentProgress(dbTaskId, requestedCount);
+
+  const allSlotsDone = progress.pendingCount === 0;
+
+  return NextResponse.json({
+    fulfillmentMode: task.fulfillmentMode,
+    requestedCount: progress.requestedCount,
+    successfulCount: progress.successfulCount,
+    failedCount: progress.failedCount,
+    pendingCount: progress.pendingCount,
+    isComplete: allSlotsDone,
+    successUrls: progress.successUrls,
+    deliveryDeadlineAt: task.deliveryDeadlineAt?.toISOString() ?? null,
+  });
 }

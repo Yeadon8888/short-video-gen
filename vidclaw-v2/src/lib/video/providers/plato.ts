@@ -3,7 +3,7 @@ import type {
   VideoProviderAdapter,
   VideoProviderCapabilities,
 } from "@/lib/video/service";
-import type { TaskStatusResult, VideoParams } from "@/lib/video/types";
+import type { TaskStatusResult, TerminalClass, VideoParams } from "@/lib/video/types";
 
 const DEFAULT_BASE_URL = "https://api.bltcy.ai";
 const CREATE_ENDPOINT = "/v2/videos/generations";
@@ -86,6 +86,53 @@ function isRetryableOverload(status: number, message: string): boolean {
     normalized.includes("temporarily unavailable") ||
     normalized.includes("try again later")
   );
+}
+
+function classifyFailReason(failReason: string): {
+  retryable: boolean;
+  terminalClass: TerminalClass;
+} {
+  const msg = failReason.toLowerCase();
+
+  if (
+    msg.includes("prominent_people") ||
+    msg.includes("content policy") ||
+    msg.includes("safety") ||
+    msg.includes("违规") ||
+    msg.includes("审核")
+  ) {
+    return { retryable: false, terminalClass: "content_policy" };
+  }
+
+  if (
+    msg.includes("quota") ||
+    msg.includes("limit exceeded") ||
+    msg.includes("余额不足") ||
+    msg.includes("account")
+  ) {
+    return { retryable: false, terminalClass: "quota_exceeded" };
+  }
+
+  if (
+    msg.includes("timeout") ||
+    msg.includes("timed out") ||
+    msg.includes("超时")
+  ) {
+    return { retryable: true, terminalClass: "timeout" };
+  }
+
+  if (
+    msg.includes("server error") ||
+    msg.includes("internal") ||
+    msg.includes("500") ||
+    msg.includes("服务器") ||
+    msg.includes("provider")
+  ) {
+    return { retryable: true, terminalClass: "provider_error" };
+  }
+
+  // Default: treat as retryable unknown
+  return { retryable: true, terminalClass: "unknown" };
 }
 
 async function apiRequest(
@@ -252,13 +299,17 @@ export const platoProvider: VideoProviderAdapter = {
       };
     }
     if (FAILURE_STATES.has(status)) {
+      const failReason = String(
+        result.fail_reason || result.message || "Video task failed",
+      );
+      const { retryable, terminalClass } = classifyFailReason(failReason);
       return {
         taskId,
         status: "FAILED",
         progress,
-        failReason: String(
-          result.fail_reason || result.message || "Video task failed",
-        ),
+        failReason,
+        retryable,
+        terminalClass,
       };
     }
     return { taskId, status, progress };
