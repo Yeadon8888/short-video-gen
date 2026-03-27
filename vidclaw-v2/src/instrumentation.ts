@@ -7,7 +7,6 @@
  * Has no effect in the browser or on Vercel (where no proxy is needed).
  */
 export async function register() {
-  // Only run in Node.js runtime, not edge
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
   const proxyUrl =
@@ -16,15 +15,13 @@ export async function register() {
     process.env.http_proxy ||
     process.env.HTTP_PROXY;
 
-  if (proxyUrl && typeof globalThis.fetch !== "undefined") {
-    try {
-      // Use require() to prevent webpack from statically analyzing undici imports
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const undici = require("undici") as typeof import("undici");
-      undici.setGlobalDispatcher(new undici.ProxyAgent(proxyUrl));
-      console.log(`[instrumentation] Global fetch proxy → ${proxyUrl}`);
-    } catch {
-      // undici not installed or incompatible — skip silently
-    }
+  if (!proxyUrl) return;
+
+  try {
+    const { setGlobalDispatcher, ProxyAgent } = await import("undici");
+    setGlobalDispatcher(new ProxyAgent(proxyUrl));
+    console.log(`[instrumentation] Global fetch proxy → ${proxyUrl}`);
+  } catch {
+    // undici not available or proxy setup failed — skip silently
   }
 }
