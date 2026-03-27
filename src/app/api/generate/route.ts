@@ -22,6 +22,11 @@ import {
   createVideoTasks,
   resolveActiveVideoModel,
 } from "@/lib/video/service";
+import {
+  initializeSlots,
+  submitPendingSlots,
+} from "@/lib/tasks/fulfillment";
+import { computeDeliveryDeadline } from "@/lib/tasks/retry-policy";
 
 export const maxDuration = 300; // Vercel max
 const MAX_REFERENCE_IMAGES = 4;
@@ -68,7 +73,11 @@ export async function POST(req: NextRequest) {
     selectedImageIds,
     params,
     scheduled,
+    fulfillmentMode: rawFulfillmentMode,
   } = body;
+  const fulfillmentMode = rawFulfillmentMode === "backfill_until_target"
+    ? "backfill_until_target" as const
+    : "standard" as const;
   const effectiveSourceMode =
     sourceMode ?? (type === "video_key" ? "upload" : type);
   const effectiveCreativeBrief = creativeBrief?.trim() || modification?.trim() || undefined;
@@ -329,6 +338,10 @@ export async function POST(req: NextRequest) {
         // This prevents the "submit task but fail to deduct" race condition.
 
         const taskType = type === "theme" ? "theme" : type === "url" ? "url" : "remix";
+        const now = new Date();
+        const startedAt = now;
+        const deliveryDeadlineAt = computeDeliveryDeadline(startedAt);
+
         const immediateResult = await db.transaction(async (tx) => {
           const [deducted] = await tx
             .update(users)
@@ -353,6 +366,11 @@ export async function POST(req: NextRequest) {
               soraPrompt,
               scriptJson: scriptResult,
               creditsCost: totalCost,
+              fulfillmentMode,
+              requestedCount: fulfillmentMode === "backfill_until_target" ? count : null,
+              successfulCount: 0,
+              startedAt,
+              deliveryDeadlineAt: fulfillmentMode === "backfill_until_target" ? deliveryDeadlineAt : null,
               paramsJson: {
                 orientation: params.orientation,
                 duration: params.duration,
@@ -372,7 +390,9 @@ export async function POST(req: NextRequest) {
             userId: user.id,
             type: "consume",
             amount: -totalCost,
-            reason: `视频生成 (${modelSlug} × ${count})`,
+            reason: fulfillmentMode === "backfill_until_target"
+              ? `目标补齐生成 (${modelSlug} × ${count})`
+              : `视频生成 (${modelSlug} × ${count})`,
             modelId: modelRow?.id,
             taskId: task.id,
             balanceAfter: deducted.credits,
@@ -389,71 +409,112 @@ export async function POST(req: NextRequest) {
         }
         const { task } = immediateResult;
 
-        // ── Step 5: Submit Sora task ──
-        const videoRequest = {
-          prompt: soraPrompt,
-          imageUrls: referenceImageUrls,
-          orientation: params.orientation,
-          duration: params.duration,
-          count,
-          model: modelSlug,
-        };
+        send({ type: "stage", stage: "GENERATE", message: "提交视频任务..." });
 
-        send({ type: "stage", stage: "GENERATE", message: "提交 Sora 任务..." });
-
+        // ── Step 5: Submit tasks (backfill = slot-based, standard = direct) ──
         let providerTaskIds: string[];
         let resolvedVideoParams: VideoParams;
-        try {
-          const submitted = await createVideoTasks({
-            model: modelRow,
-            request: videoRequest,
-          });
-          providerTaskIds = submitted.providerTaskIds;
-          resolvedVideoParams = submitted.resolvedParams;
-          log(`任务已提交: ${providerTaskIds.join(", ")}`);
-        } catch (e) {
-          console.error("[generate] Provider task creation failed", {
-            taskId: task.id,
-            userId: user.id,
-            modelSlug,
+
+        if (fulfillmentMode === "backfill_until_target") {
+          // Initialize slots, then submit one attempt per slot
+          await initializeSlots(task.id, count);
+          try {
+            providerTaskIds = await submitPendingSlots(task);
+            // resolvedVideoParams is not returned by slot path — reconstruct a minimal version
+            resolvedVideoParams = {
+              prompt: soraPrompt,
+              imageUrls: referenceImageUrls,
+              orientation: params.orientation,
+              duration: params.duration,
+              count,
+              model: modelSlug,
+            };
+            log(`[目标补齐] 已提交 ${providerTaskIds.length}/${count} 个任务`);
+            if (providerTaskIds.length === 0) {
+              throw new Error("所有 slot 提交失败");
+            }
+          } catch (e) {
+            await failTaskAndRefund({
+              taskId: task.id,
+              userId: user.id,
+              refundAmount: totalCost,
+              errorMessage: String(e).slice(0, 500),
+              refundReason: "视频提交失败自动退款",
+              allowedStatuses: ["generating"],
+            });
+            send({
+              type: "error",
+              code: "SORA_UNAVAILABLE",
+              message: "视频生成服务暂时不可用，积分已自动退还。",
+              sora_prompt: soraPrompt,
+            });
+            send({ type: "done" });
+            controller.close();
+            return;
+          }
+        } else {
+          // Standard mode: submit all in one batch
+          const videoRequest = {
+            prompt: soraPrompt,
+            imageUrls: referenceImageUrls,
+            orientation: params.orientation,
+            duration: params.duration,
             count,
-            type,
-            error: String(e),
-          });
+            model: modelSlug,
+          };
 
-          await failTaskAndRefund({
-            taskId: task.id,
-            userId: user.id,
-            refundAmount: totalCost,
-            errorMessage: String(e).slice(0, 500),
-            refundReason: "视频提交失败自动退款",
-            allowedStatuses: ["generating"],
-          });
+          try {
+            const submitted = await createVideoTasks({
+              model: modelRow,
+              request: videoRequest,
+            });
+            providerTaskIds = submitted.providerTaskIds;
+            resolvedVideoParams = submitted.resolvedParams;
+            log(`任务已提交: ${providerTaskIds.join(", ")}`);
+          } catch (e) {
+            console.error("[generate] Provider task creation failed", {
+              taskId: task.id,
+              userId: user.id,
+              modelSlug,
+              count,
+              type,
+              error: String(e),
+            });
 
-          const errMsg = String(e);
-          let userMessage = "视频生成服务暂时不可用，积分已自动退还。";
-          if (errMsg.includes("PROMINENT_PEOPLE")) {
-            userMessage = "参考图中可能包含名人面孔，视频平台不允许生成。请更换图片后重试，积分已自动退还。";
+            await failTaskAndRefund({
+              taskId: task.id,
+              userId: user.id,
+              refundAmount: totalCost,
+              errorMessage: String(e).slice(0, 500),
+              refundReason: "视频提交失败自动退款",
+              allowedStatuses: ["generating"],
+            });
+
+            const errMsg = String(e);
+            let userMessage = "视频生成服务暂时不可用，积分已自动退还。";
+            if (errMsg.includes("PROMINENT_PEOPLE")) {
+              userMessage = "参考图中可能包含名人面孔，视频平台不允许生成。请更换图片后重试，积分已自动退还。";
+            }
+
+            send({
+              type: "error",
+              code: "SORA_UNAVAILABLE",
+              message: userMessage,
+              sora_prompt: soraPrompt,
+            });
+            send({ type: "done" });
+            controller.close();
+            return;
           }
 
-          send({
-            type: "error",
-            code: "SORA_UNAVAILABLE",
-            message: userMessage,
-            sora_prompt: soraPrompt,
-          });
-          send({ type: "done" });
-          controller.close();
-          return;
-        }
-
-        // Insert task items for each provider task
-        for (const providerTaskId of providerTaskIds) {
-          await db.insert(taskItems).values({
-            taskId: task.id,
-            providerTaskId,
-            status: "PENDING",
-          });
+          // Insert task items for standard mode
+          for (const providerTaskId of providerTaskIds) {
+            await db.insert(taskItems).values({
+              taskId: task.id,
+              providerTaskId,
+              status: "PENDING",
+            });
+          }
         }
 
         // ── Step 6: Return task IDs ──
@@ -461,8 +522,13 @@ export async function POST(req: NextRequest) {
           type: "tasks",
           taskIds: providerTaskIds,
           dbTaskId: task.id,
+          fulfillmentMode,
+          requestedCount: fulfillmentMode === "backfill_until_target" ? count : undefined,
+          deliveryDeadlineAt: fulfillmentMode === "backfill_until_target"
+            ? deliveryDeadlineAt.toISOString()
+            : undefined,
           sora_prompt: soraPrompt,
-          resolved_params: resolvedVideoParams,
+          resolved_params: resolvedVideoParams!,
         });
 
         send({ type: "done" });

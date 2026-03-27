@@ -1,6 +1,16 @@
 import type { NextConfig } from "next";
+import type { Configuration } from "webpack";
 
 const nextConfig: NextConfig = {
+  webpack: (config: Configuration) => {
+    // undici uses node: protocol URIs which webpack cannot handle;
+    // it's server-only and loaded at runtime, so we exclude it from the bundle.
+    config.externals = [
+      ...(Array.isArray(config.externals) ? config.externals : config.externals ? [config.externals] : []),
+      "undici",
+    ];
+    return config;
+  },
   // Allow external images from R2 CDN and video providers
   images: {
     remotePatterns: [
@@ -24,10 +34,6 @@ const nextConfig: NextConfig = {
   },
   // Serverless function timeout for SSE streaming (Vercel Pro)
   serverExternalPackages: ["postgres"],
-  // Suppress turbopack root warning in monorepo
-  turbopack: {
-    root: ".",
-  },
   // Security headers
   headers: async () => [
     {

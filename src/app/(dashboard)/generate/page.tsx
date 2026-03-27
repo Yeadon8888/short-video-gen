@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { CalendarClock, Zap } from "lucide-react";
+import { CalendarClock, RefreshCw, Zap } from "lucide-react";
 import { useGenerateStore } from "@/stores/generate";
+import type { FulfillmentMode } from "@/lib/video/types";
 import { GenerateFormPanels } from "@/components/generate/GenerateFormPanels";
 import { GenerateIdleCards } from "@/components/generate/GenerateIdleCards";
 import { ParamBar } from "@/components/generate/ParamBar";
@@ -37,11 +38,13 @@ export default function GeneratePage() {
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
   const [batchImageIds, setBatchImageIds] = useState<string[]>([]);
   const [scheduled, setScheduled] = useState(false);
+  const [fulfillmentMode, setFulfillmentMode] = useState<FulfillmentMode>("standard");
   const [pendingVideo, setPendingVideo] = useState<PendingVideo | null>(null);
   const [batchSummary, setBatchSummary] = useState<BatchSummary | null>(null);
 
   const stage = useGenerateStore((s) => s.stage);
   const errorMessage = useGenerateStore((s) => s.errorMessage);
+  const deliveryProgress = useGenerateStore((s) => s.deliveryProgress);
   const reset = useGenerateStore((s) => s.reset);
   const params = useGenerateStore((s) => s.params);
   const setParams = useGenerateStore((s) => s.setParams);
@@ -81,6 +84,7 @@ export default function GeneratePage() {
         selectedImageIds,
         params,
         scheduled,
+        fulfillmentMode: scheduled ? "standard" : fulfillmentMode,
       };
       void startStreamGenerate(request);
       return;
@@ -96,6 +100,7 @@ export default function GeneratePage() {
         selectedImageIds,
         params,
         scheduled,
+        fulfillmentMode: scheduled ? "standard" : fulfillmentMode,
       };
       void startStreamGenerate(request);
       return;
@@ -111,6 +116,7 @@ export default function GeneratePage() {
         selectedImageIds,
         params,
         scheduled,
+        fulfillmentMode: scheduled ? "standard" : fulfillmentMode,
       };
       void startStreamGenerate(request);
       return;
@@ -182,6 +188,24 @@ export default function GeneratePage() {
           <ParamBar />
           <div className="flex flex-col items-end gap-2">
             <div className="flex items-center gap-3">
+              {activeTab !== "batch" && !scheduled && (
+                <button
+                  onClick={() =>
+                    setFulfillmentMode((m) =>
+                      m === "backfill_until_target" ? "standard" : "backfill_until_target",
+                    )
+                  }
+                  disabled={isLoading}
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-all ${
+                    fulfillmentMode === "backfill_until_target"
+                      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                      : "border-[var(--vc-border)] text-[var(--vc-text-muted)] hover:border-emerald-500/30 hover:text-emerald-300"
+                  }`}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  失败自动补齐
+                </button>
+              )}
               {activeTab !== "batch" && (
                 <button
                   onClick={() => setScheduled((value) => !value)}
@@ -205,6 +229,11 @@ export default function GeneratePage() {
                 {activeTab === "batch" ? "创建批量任务" : scheduled ? "定时生成" : "生成"}
               </button>
             </div>
+            {activeTab !== "batch" && fulfillmentMode === "backfill_until_target" && !scheduled && (
+              <p className="text-right text-xs text-[var(--vc-text-muted)]">
+                开启后，失败的视频将在 3 小时内自动补发，直到达到目标数量。建议保持页面打开。
+              </p>
+            )}
             {activeTab !== "batch" && scheduled && (
               <p className="text-right text-xs text-[var(--vc-text-muted)]">
                 会先保存脚本并扣除积分，随后在北京时间次日凌晨 02:00 自动提交生成。
@@ -255,6 +284,41 @@ export default function GeneratePage() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {deliveryProgress && stage === "POLL" && (
+        <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2 text-sm text-emerald-300">
+              <RefreshCw className="h-4 w-4 animate-spin" />
+              <span>
+                目标补齐中：{deliveryProgress.successfulCount}/{deliveryProgress.requestedCount} 成功
+                {deliveryProgress.pendingCount > 0 && `，${deliveryProgress.pendingCount} 进行中`}
+                {deliveryProgress.failedCount > 0 && `，${deliveryProgress.failedCount} 失败`}
+              </span>
+            </div>
+            {deliveryProgress.deliveryDeadlineAt && (
+              <span className="shrink-0 text-xs text-[var(--vc-text-muted)]">
+                补齐截止{" "}
+                {new Intl.DateTimeFormat("zh-CN", {
+                  timeZone: "Asia/Shanghai",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                }).format(new Date(deliveryProgress.deliveryDeadlineAt))}
+              </span>
+            )}
+          </div>
+          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[var(--vc-border)]">
+            <div
+              className="h-full rounded-full bg-emerald-500 transition-all duration-500"
+              style={{
+                width: `${Math.round(
+                  (deliveryProgress.successfulCount / Math.max(deliveryProgress.requestedCount, 1)) * 100,
+                )}%`,
+              }}
+            />
+          </div>
         </div>
       )}
 

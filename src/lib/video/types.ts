@@ -18,12 +18,23 @@ export interface TaskResult {
   failReason?: string;
 }
 
+export type TerminalClass =
+  | "content_policy"
+  | "quota_exceeded"
+  | "provider_error"
+  | "timeout"
+  | "unknown";
+
 export interface TaskStatusResult {
   taskId: string;
   status: string;
   progress: string;
   url?: string;
   failReason?: string;
+  /** Whether this failure is retryable (only set when status === "FAILED") */
+  retryable?: boolean;
+  /** Classified failure category (only set when status === "FAILED") */
+  terminalClass?: TerminalClass;
 }
 
 // ─── Gemini / Script types ───
@@ -95,6 +106,8 @@ export interface TaskParamsSnapshot {
 
 // ─── API request / SSE types ───
 
+export type FulfillmentMode = "standard" | "backfill_until_target";
+
 export interface GenerateRequest {
   type: "theme" | "video_key" | "url";
   input: string;
@@ -104,6 +117,8 @@ export interface GenerateRequest {
   selectedImageIds?: string[];
   /** When true, task is saved as "scheduled" for later execution */
   scheduled?: boolean;
+  /** Fulfillment mode — defaults to "standard" */
+  fulfillmentMode?: FulfillmentMode;
   params: {
     orientation: "portrait" | "landscape";
     duration: 8 | 10 | 15;

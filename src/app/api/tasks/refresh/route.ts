@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { taskGroups, taskItems, tasks } from "@/lib/db/schema";
+import { taskGroups, taskItems, taskSlots, tasks } from "@/lib/db/schema";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import {
   ACTIVE_TASK_STATUSES,
@@ -10,6 +10,11 @@ import {
 import { processPendingBatchTasks } from "@/lib/tasks/batch-processing";
 import { processDueScheduledTasks } from "@/lib/tasks/scheduled";
 import { queryVideoTaskStatus } from "@/lib/video/service";
+import {
+  advanceSlotOnResult,
+  expireDeadlineSlots,
+  getActiveProviderTaskIds,
+} from "@/lib/tasks/fulfillment";
 
 /**
  * GET /api/tasks/refresh
@@ -62,6 +67,62 @@ export async function GET() {
 
   // For each active task, poll its sub-task items from the provider
   for (const task of activeTasks) {
+    // ── Fulfillment (backfill) mode ──
+    if (task.fulfillmentMode === "backfill_until_target") {
+      if (task.deliveryDeadlineAt) {
+        await expireDeadlineSlots(task.id, task.deliveryDeadlineAt);
+      }
+
+      const activeItems = await getActiveProviderTaskIds(task.id);
+      for (const { providerTaskId, slotId, itemId } of activeItems) {
+        try {
+          const result = await queryVideoTaskStatus({
+            modelId: task.modelId,
+            taskId: providerTaskId,
+          });
+
+          await db
+            .update(taskItems)
+            .set({
+              status: result.status,
+              progress: result.progress,
+              resultUrl: result.url,
+              failReason: result.failReason,
+              retryable: result.retryable,
+              terminalClass: result.terminalClass,
+              ...(result.status === "SUCCESS" || result.status === "FAILED"
+                ? { completedAt: new Date() }
+                : {}),
+            })
+            .where(eq(taskItems.id, itemId));
+
+          if (result.status === "SUCCESS" || result.status === "FAILED") {
+            const [slot] = await db
+              .select()
+              .from(taskSlots)
+              .where(eq(taskSlots.id, slotId))
+              .limit(1);
+
+            if (slot) {
+              await advanceSlotOnResult({
+                task,
+                slot,
+                itemStatus: result.status as "SUCCESS" | "FAILED",
+                resultUrl: result.url,
+                failReason: result.failReason,
+                retryable: result.retryable,
+                terminalClass: result.terminalClass,
+              });
+            }
+          }
+        } catch {
+          // Provider query failed — skip
+        }
+      }
+      continue;
+    }
+
+    // ── Standard mode ──
     const items = await db
       .select()
       .from(taskItems)
@@ -87,6 +148,8 @@ export async function GET() {
             progress: result.progress,
             resultUrl: result.url,
             failReason: result.failReason,
+            retryable: result.retryable,
+            terminalClass: result.terminalClass,
             ...(result.status === "SUCCESS" || result.status === "FAILED"
               ? { completedAt: new Date() }
               : {}),
