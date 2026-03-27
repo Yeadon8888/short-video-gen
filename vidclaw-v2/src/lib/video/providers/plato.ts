@@ -221,8 +221,35 @@ function extractVideoUrl(result: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
+function isGrokSlug(slug: string): boolean {
+  return slug.toLowerCase().includes("grok");
+}
+
+/**
+ * Map orientation → Grok ratio string.
+ * portrait → "2:3", landscape → "3:2"
+ */
+function toGrokRatio(
+  orientation: VideoParams["orientation"],
+): "2:3" | "3:2" {
+  return orientation === "portrait" ? "2:3" : "3:2";
+}
+
+/**
+ * Map our internal duration to the nearest Grok-supported value (6 or 10).
+ */
+function toGrokDuration(duration: number): 6 | 10 {
+  return duration <= 6 ? 6 : 10;
+}
+
 function inferPlatoCapabilities(model: VideoModelRecord): VideoProviderCapabilities {
   const slug = model.slug.toLowerCase();
+  if (isGrokSlug(slug)) {
+    return {
+      allowedDurations: [8, 10],
+      defaultDuration: 10,
+    };
+  }
   if (slug.includes("veo")) {
     return {
       allowedDurations: [8],
@@ -249,23 +276,41 @@ export const platoProvider: VideoProviderAdapter = {
   async createTasks({ model, params }) {
     const taskIds: string[] = [];
     const providerOptions = params.providerOptions ?? {};
-    const payload = {
-      ...providerOptions,
-      prompt: params.prompt,
-      model: model.slug,
-      images: params.imageUrls ?? [],
-      aspect_ratio: toAspectRatio(params.orientation),
-      duration: params.duration,
-      watermark:
-        typeof providerOptions.watermark === "boolean"
-          ? providerOptions.watermark
-          : true,
-      private:
-        typeof providerOptions.private === "boolean"
-          ? providerOptions.private
-          : false,
-      ...(getHdEnabled() ? { hd: true } : {}),
-    };
+
+    const grok = isGrokSlug(model.slug);
+    const images = params.imageUrls ?? [];
+
+    const payload = grok
+      ? {
+          // Grok-specific payload: ratio / resolution / images (max 1)
+          prompt: params.prompt,
+          model: model.slug,
+          ratio: toGrokRatio(params.orientation),
+          resolution:
+            typeof providerOptions.resolution === "string"
+              ? providerOptions.resolution
+              : "720P",
+          duration: toGrokDuration(params.duration),
+          ...(images.length > 0 ? { images: [images[0]] } : {}),
+        }
+      : {
+          // Standard plato payload
+          ...providerOptions,
+          prompt: params.prompt,
+          model: model.slug,
+          images,
+          aspect_ratio: toAspectRatio(params.orientation),
+          duration: params.duration,
+          watermark:
+            typeof providerOptions.watermark === "boolean"
+              ? providerOptions.watermark
+              : true,
+          private:
+            typeof providerOptions.private === "boolean"
+              ? providerOptions.private
+              : false,
+          ...(getHdEnabled() ? { hd: true } : {}),
+        };
 
     for (let index = 0; index < params.count; index += 1) {
       const result = await apiRequest(model, "POST", CREATE_ENDPOINT, payload);
