@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { taskItems, tasks } from "@/lib/db/schema";
 import type { ScriptResult, TaskParamsSnapshot } from "@/lib/video/types";
 import { CopyTextButton } from "@/components/ui/CopyTextButton";
+import { TaskDetailAutoRefresh } from "@/components/tasks/TaskDetailAutoRefresh";
 import { buildGenerateReplayHref } from "@/lib/generate/preset";
 import {
   buildPublishHashtagText,
@@ -138,6 +139,7 @@ export default async function TaskDetailPage({
 
   return (
     <div className="mx-auto max-w-5xl space-y-5">
+      <TaskDetailAutoRefresh taskId={task.id} status={task.status} />
       <div className="space-y-2">
         <p className="text-xs uppercase tracking-[0.2em] text-[var(--vc-text-dim)]">
           任务档案
