@@ -6,9 +6,24 @@ import { creditTxns, taskGroups, tasks, users } from "@/lib/db/schema";
 import type { BatchGenerateRequest, TaskParamsSnapshot } from "@/lib/video/types";
 import { assignImageSequence, resolveSelectedImageAssets } from "@/lib/generate/assets";
 import { processPendingBatchTasks } from "@/lib/tasks/batch-processing";
+import {
+  computeBatchTotalVideoCount,
+  resolveBatchUnitsPerProduct,
+} from "@/lib/tasks/batch-math";
+import { getMaxBatchGroupSubmissionsPerTick } from "@/lib/tasks/batch-queue";
 import { resolveActiveVideoModel } from "@/lib/video/service";
+import { computeDeliveryDeadline } from "@/lib/tasks/retry-policy";
+import type { OutputLanguage } from "@/lib/video/types";
 
 export const maxDuration = 300;
+
+export function resolveOutputLanguage(
+  outputLanguage: OutputLanguage | undefined,
+  platform: "douyin" | "tiktok" | undefined,
+): OutputLanguage {
+  if (outputLanguage && outputLanguage !== "auto") return outputLanguage;
+  return platform === "douyin" ? "auto" : "en";
+}
 
 export async function POST(req: NextRequest) {
   const authResult = await requireAuth();
@@ -17,8 +32,19 @@ export async function POST(req: NextRequest) {
 
   const body = (await req.json()) as BatchGenerateRequest;
   const batchTheme = body.batchTheme?.trim();
-  const count = Math.min(Math.max(body.params.count, 1), 10);
+  const unitsPerProduct = resolveBatchUnitsPerProduct({
+    batchUnitsPerProduct: body.unitsPerProduct,
+    count: body.params.count,
+  });
   const selectionMode = body.selectionMode ?? "sequence";
+  const fulfillmentMode: "standard" | "backfill_until_target" =
+    body.fulfillmentMode === "backfill_until_target"
+    ? "backfill_until_target"
+    : "standard";
+  const resolvedOutputLanguage = resolveOutputLanguage(
+    body.params.outputLanguage,
+    body.params.platform,
+  );
 
   if (!batchTheme) {
     return NextResponse.json({ error: "请输入批量创意主题。" }, { status: 400 });
@@ -35,7 +61,9 @@ export async function POST(req: NextRequest) {
   }
 
   const modelRow = await resolveActiveVideoModel(body.params.model);
-  const totalCost = modelRow.creditsPerGen * count;
+  const productCount = selectedAssets.length;
+  const totalVideoCount = computeBatchTotalVideoCount(productCount, unitsPerProduct);
+  const totalCost = modelRow.creditsPerGen * totalVideoCount;
   if (user.credits < totalCost) {
     return NextResponse.json(
       { error: `积分不足。需要 ${totalCost} 积分，当前余额 ${user.credits}。` },
@@ -45,10 +73,12 @@ export async function POST(req: NextRequest) {
 
   const assignedAssets = assignImageSequence({
     assets: selectedAssets,
-    count,
+    count: productCount,
     selectionMode,
   });
   const batchRunId = crypto.randomUUID();
+  const startedAt = new Date();
+  const deliveryDeadlineAt = computeDeliveryDeadline(startedAt);
   const creation = await db.transaction(async (tx) => {
     const [deducted] = await tx
       .update(users)
@@ -72,13 +102,16 @@ export async function POST(req: NextRequest) {
         paramsJson: {
           orientation: body.params.orientation,
           duration: body.params.duration,
-          count,
-          platform: body.params.platform ?? "douyin",
+          count: totalVideoCount,
+          platform: body.params.platform ?? "tiktok",
+          outputLanguage: resolvedOutputLanguage,
           model: modelRow.slug,
+          batchUnitsPerProduct: unitsPerProduct,
+          batchProductCount: productCount,
           selectedImageIds: selectedAssets.map((asset) => asset.id),
           selectedAssets,
         },
-        requestedCount: count,
+        requestedCount: totalVideoCount,
         creditsCost: totalCost,
       })
       .returning();
@@ -90,12 +123,15 @@ export async function POST(req: NextRequest) {
           const paramsJson: TaskParamsSnapshot = {
             orientation: body.params.orientation,
             duration: body.params.duration,
-            count: 1,
-            platform: body.params.platform ?? "douyin",
+            count: unitsPerProduct,
+            platform: body.params.platform ?? "tiktok",
+            outputLanguage: resolvedOutputLanguage,
             model: modelRow.slug,
             imageUrls: [assignedAsset.url],
             sourceMode: "batch",
             batchTheme,
+            batchUnitsPerProduct: unitsPerProduct,
+            batchProductCount: productCount,
             selectionMode,
             selectedImageIds: selectedAssets.map((asset) => asset.id),
             selectedAssets,
@@ -103,7 +139,7 @@ export async function POST(req: NextRequest) {
             assignedAssetIndex: index,
             batchRunId,
             batchIndex: index + 1,
-            batchTotal: count,
+            batchTotal: totalVideoCount,
           };
 
           return {
@@ -113,7 +149,12 @@ export async function POST(req: NextRequest) {
             status: "pending" as const,
             modelId: modelRow.id,
             inputText: batchTheme,
-            creditsCost: modelRow.creditsPerGen,
+            creditsCost: modelRow.creditsPerGen * unitsPerProduct,
+            fulfillmentMode,
+            requestedCount: fulfillmentMode === "backfill_until_target" ? unitsPerProduct : null,
+            successfulCount: 0,
+            startedAt: fulfillmentMode === "backfill_until_target" ? startedAt : null,
+            deliveryDeadlineAt: fulfillmentMode === "backfill_until_target" ? deliveryDeadlineAt : null,
             paramsJson,
           };
         }),
@@ -124,11 +165,15 @@ export async function POST(req: NextRequest) {
       createdTasks.map((task, index) => ({
         userId: user.id,
         type: "consume" as const,
-        amount: -modelRow.creditsPerGen,
-        reason: `批量带货生成 (${modelRow.slug} #${index + 1}/${count})`,
+        amount: -(modelRow.creditsPerGen * unitsPerProduct),
+        reason:
+          fulfillmentMode === "backfill_until_target"
+            ? `批量带货目标补齐 (${modelRow.slug} 商品#${index + 1}/${productCount} × ${unitsPerProduct})`
+            : `批量带货生成 (${modelRow.slug} 商品#${index + 1}/${productCount} × ${unitsPerProduct})`,
         modelId: modelRow.id,
         taskId: task.id,
-        balanceAfter: deducted.credits + modelRow.creditsPerGen * (count - index - 1),
+        balanceAfter:
+          deducted.credits + modelRow.creditsPerGen * unitsPerProduct * (productCount - index - 1),
       })),
     );
 
@@ -148,7 +193,7 @@ export async function POST(req: NextRequest) {
   after(async () => {
     await processPendingBatchTasks({
       taskGroupId: creation.taskGroupId,
-      limit: count,
+      limit: Math.min(productCount, getMaxBatchGroupSubmissionsPerTick()),
     });
   });
 
@@ -159,6 +204,8 @@ export async function POST(req: NextRequest) {
     createdCount: creation.taskIds.length,
     failedCount: 0,
     taskIds: creation.taskIds,
+    unitsPerProduct,
+    totalVideoCount,
     errors: [],
   });
 }

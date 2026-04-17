@@ -14,6 +14,7 @@ interface UseGeneratePresetParams {
   setUrlBrief: (value: string) => void;
   setUploadBrief: (value: string) => void;
   setBatchTheme: (value: string) => void;
+  setBatchUnitsPerProduct: (value: number) => void;
   setSelectedImageIds: (value: string[]) => void;
   setBatchImageIds: (value: string[]) => void;
   setPendingVideo: (value: PendingVideo | null) => void;
@@ -28,6 +29,7 @@ export function useGeneratePreset({
   setUrlBrief,
   setUploadBrief,
   setBatchTheme,
+  setBatchUnitsPerProduct,
   setSelectedImageIds,
   setBatchImageIds,
   setPendingVideo,
@@ -57,6 +59,9 @@ export function useGeneratePreset({
       }
       if (typeof preset.uploadBrief === "string") setUploadBrief(preset.uploadBrief);
       if (typeof preset.batchTheme === "string") setBatchTheme(preset.batchTheme);
+      if (typeof preset.batchUnitsPerProduct === "number") {
+        setBatchUnitsPerProduct(preset.batchUnitsPerProduct);
+      }
       if (preset.selectedImageIds) setSelectedImageIds(preset.selectedImageIds);
       if (preset.batchImageIds) setBatchImageIds(preset.batchImageIds);
       if (preset.params) setParams(preset.params);
@@ -68,6 +73,7 @@ export function useGeneratePreset({
     setActiveTab,
     setBatchImageIds,
     setBatchTheme,
+    setBatchUnitsPerProduct,
     setParams,
     setPendingVideo,
     setSelectedImageIds,

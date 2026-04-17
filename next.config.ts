@@ -26,7 +26,7 @@ const nextConfig: NextConfig = {
     ],
   },
   // Serverless function timeout for SSE streaming (Vercel Pro)
-  serverExternalPackages: ["postgres"],
+  serverExternalPackages: ["postgres", "sharp"],
   // Security headers
   headers: async () => [
     {

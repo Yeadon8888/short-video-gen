@@ -1,15 +1,17 @@
+import type { VideoDuration } from "@/lib/video/types";
+
 export interface GenerateModelOption {
   slug: string;
   name: string;
   provider: string;
   creditsPerGen: number;
-  allowedDurations: Array<8 | 10 | 15>;
-  defaultDuration: 8 | 10 | 15;
+  allowedDurations: VideoDuration[];
+  defaultDuration: VideoDuration;
 }
 
 export interface GenerateParamSnapshot {
   model: string;
-  duration: 8 | 10 | 15;
+  duration: VideoDuration;
 }
 
 export function resolveModelSelectionPatch(

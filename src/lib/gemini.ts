@@ -1,13 +1,91 @@
 /**
  * Gemini API — structured JSON output for video script generation.
- * Uses gemini-3.1-pro-preview (thinking model) via yunwu.ai proxy.
+ * Uses admin-configured `script_generation` model first, then falls back to env.
  */
 
-import type { ScriptResult } from "@/lib/video/types";
+import type { Model } from "@/lib/db/schema";
+import { MODEL_CAPABILITIES } from "@/lib/models/capabilities";
+import { getActiveModelByCapability } from "@/lib/models/repository";
+import type { OutputLanguage, ScriptResult } from "@/lib/video/types";
 import { buildScriptInstruction } from "@/lib/video/prompt";
 
-const GEMINI_MODEL = "gemini-3.1-pro-preview";
+const DEFAULT_GEMINI_MODEL = "gemini-3.1-pro-preview";
 const DEFAULT_BASE_URL = "https://yunwu.ai";
+
+type ScriptGenerationModelRef = Pick<
+  Model,
+  "id" | "slug" | "apiKey" | "baseUrl"
+>;
+
+interface ScriptGenerationConfig {
+  model: string;
+  apiKey: string;
+  baseUrl: string;
+  source: "admin_model" | "env";
+}
+
+export function resolveLanguageSpec(outputLanguage?: OutputLanguage): {
+  spoken: string;
+  content: string;
+  instruction: string;
+} {
+  switch (outputLanguage) {
+    case "en":
+      return {
+        spoken: "English",
+        content: "English",
+        instruction: "All spoken dialogue, voiceover, title, caption, hashtags, and first_comment must be in English.",
+      };
+    case "es-mx":
+      return {
+        spoken: "Mexican Spanish",
+        content: "Mexican Spanish",
+        instruction: "All spoken dialogue and voiceover must be in Mexican Spanish. Title, caption, hashtags, and first_comment must also be in Mexican Spanish. Do not output English copy unless explicitly requested.",
+      };
+    case "es":
+      return {
+        spoken: "Spanish",
+        content: "Spanish",
+        instruction: "All spoken dialogue, voiceover, title, caption, hashtags, and first_comment must be in Spanish.",
+      };
+    case "ms":
+      return {
+        spoken: "Malay (Malaysia)",
+        content: "Malay (Malaysia)",
+        instruction: "All spoken dialogue, voiceover, title, caption, hashtags, and first_comment must be in Malay as used in Malaysia.",
+      };
+    case "en-my":
+      return {
+        spoken: "Malaysian English",
+        content: "Malaysian English",
+        instruction: "All spoken dialogue, voiceover, title, caption, hashtags, and first_comment must be in Malaysian English.",
+      };
+    case "pt-br":
+      return {
+        spoken: "Brazilian Portuguese",
+        content: "Brazilian Portuguese",
+        instruction: "All spoken dialogue, voiceover, title, caption, hashtags, and first_comment must be in Brazilian Portuguese.",
+      };
+    case "id":
+      return {
+        spoken: "Indonesian",
+        content: "Indonesian",
+        instruction: "All spoken dialogue, voiceover, title, caption, hashtags, and first_comment must be in Indonesian.",
+      };
+    case "ar":
+      return {
+        spoken: "Arabic",
+        content: "Arabic",
+        instruction: "All spoken dialogue, voiceover, title, caption, hashtags, and first_comment must be in Arabic.",
+      };
+    default:
+      return {
+        spoken: "follow user request if specified; otherwise match target market",
+        content: "follow user request if specified; otherwise match target market",
+        instruction: "If the user explicitly specifies a language, all spoken dialogue, voiceover, title, caption, hashtags, and first_comment must use that language consistently. Do not silently switch to English.",
+      };
+  }
+}
 
 /** Appended to custom prompts that don't include the JSON schema */
 const JSON_OUTPUT_SUFFIX = `
@@ -44,33 +122,70 @@ const JSON_OUTPUT_SUFFIX = `
 - 不要输出 Markdown、不要用 \`**\` 包裹标签、不要用逗号或列表格式输出标签
 `;
 
-function getApiKey(): string {
+function getFallbackApiKey(env: NodeJS.ProcessEnv = process.env): string {
   return (
-    process.env.GEMINI_API_KEY ||
-    process.env.YUNWU_GEMINI_API_KEY ||
-    process.env.YUNWU_API_KEY ||
+    env.GEMINI_API_KEY ||
+    env.YUNWU_GEMINI_API_KEY ||
+    env.YUNWU_API_KEY ||
     ""
-  );
+  ).trim();
 }
 
-function getBaseUrl(): string {
-  return process.env.GEMINI_BASE_URL || DEFAULT_BASE_URL;
+function getFallbackBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
+  return (env.GEMINI_BASE_URL || DEFAULT_BASE_URL).trim();
+}
+
+function getFallbackModelSlug(env: NodeJS.ProcessEnv = process.env): string {
+  return (env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL).trim();
+}
+
+export function resolveScriptGenerationConfigFromModel(
+  model?: ScriptGenerationModelRef | null,
+  env: NodeJS.ProcessEnv = process.env,
+): ScriptGenerationConfig {
+  return {
+    model: model?.slug?.trim() || getFallbackModelSlug(env),
+    apiKey: model?.apiKey?.trim() || getFallbackApiKey(env),
+    baseUrl: model?.baseUrl?.trim() || getFallbackBaseUrl(env),
+    source: model ? "admin_model" : "env",
+  };
+}
+
+async function resolveScriptGenerationConfig(): Promise<ScriptGenerationConfig> {
+  try {
+    const model = await getActiveModelByCapability({
+      capability: MODEL_CAPABILITIES.scriptGeneration,
+    });
+    return resolveScriptGenerationConfigFromModel(model);
+  } catch (error) {
+    console.warn("[script-generation] fallback to env config", {
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return resolveScriptGenerationConfigFromModel(null);
+  }
 }
 
 async function geminiRequest(payload: object): Promise<unknown> {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    throw new Error("GEMINI_API_KEY is not set");
+  const config = await resolveScriptGenerationConfig();
+  if (!config.apiKey) {
+    throw new Error("脚本分析模型未配置 API Key。");
   }
 
-  const url = `${getBaseUrl()}/v1beta/models/${GEMINI_MODEL}:generateContent`;
+  const baseUrl = config.baseUrl.replace(/\/+$/, "");
+  const url = `${baseUrl}/v1beta/models/${config.model}:generateContent`;
+
+  console.info("[script-generation] request", {
+    model: config.model,
+    source: config.source,
+    baseUrl,
+  });
 
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const res = await fetch(url, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${config.apiKey}`,
           "Content-Type": "application/json",
           Accept: "application/json",
         },
@@ -87,6 +202,11 @@ async function geminiRequest(payload: object): Promise<unknown> {
         await new Promise((r) => setTimeout(r, 5000));
         continue;
       }
+      console.error("[script-generation] request failed", {
+        model: config.model,
+        source: config.source,
+        error: e instanceof Error ? e.message : String(e),
+      });
       throw e;
     }
   }
@@ -136,6 +256,7 @@ export async function generateScript(params: {
   imageBuffers?: { buffer: ArrayBuffer; mimeType: string }[];
   promptTemplate?: string;
   platform?: "douyin" | "tiktok";
+  outputLanguage?: OutputLanguage;
 }): Promise<ScriptResult> {
   const {
     type,
@@ -147,12 +268,15 @@ export async function generateScript(params: {
     imageBuffers,
     promptTemplate,
     platform,
+    outputLanguage,
   } = params;
 
+  const languageSpec = resolveLanguageSpec(outputLanguage);
   const platformInstruction =
     platform === "tiktok"
-      ? "\n\n**IMPORTANT: This video is for TikTok (international audience). All copy (title, caption, first_comment) MUST be written in English. Sora prompts are always in English.**"
+      ? "\n\n**IMPORTANT: This video is for TikTok. Sora prompts remain in English, but visible copy and spoken language must follow the selected output language constraint below.**"
       : "";
+  const languageInstruction = `\n\n语言强约束：\n- ${languageSpec.instruction}\n- Keep sora_prompt and full_sora_prompt in English for the video model.\n- In the JSON response, add language.spoken and language.content reflecting the resolved spoken/content language.`;
 
   // Build instruction
   let instruction: string;
@@ -164,9 +288,12 @@ export async function generateScript(params: {
     if (!instruction.includes('"full_sora_prompt"')) {
       instruction += JSON_OUTPUT_SUFFIX;
     }
-    instruction += platformInstruction;
+    instruction += platformInstruction + languageInstruction;
   } else {
-    instruction = buildDefaultPrompt(type, theme, modification, creativeBrief) + platformInstruction;
+    instruction =
+      buildDefaultPrompt(type, theme, modification, creativeBrief) +
+      platformInstruction +
+      languageInstruction;
   }
   instruction = buildScriptInstruction({
     baseInstruction: instruction,
@@ -219,14 +346,17 @@ export async function generateCopy(
   soraPrompt: string,
   copyPromptTemplate: string,
   platform?: "douyin" | "tiktok",
+  outputLanguage?: OutputLanguage,
 ): Promise<{ title: string; caption: string; first_comment: string }> {
+  const languageSpec = resolveLanguageSpec(outputLanguage);
   let instruction = copyPromptTemplate.replace(
     /\{\{SORA_PROMPT\}\}/g,
     soraPrompt,
   );
+  instruction += `\n\n**IMPORTANT: Title, caption, hashtags inside caption, and first_comment MUST be in ${languageSpec.content}. Do not switch to English unless the selected output language is English.**`;
   if (platform === "tiktok") {
     instruction +=
-      "\n\n**IMPORTANT: All output (title, caption, first_comment) MUST be in English for TikTok international audience.**";
+      "\n\n**IMPORTANT: This copy is for TikTok, but the copy language must still follow the selected output language.**";
   }
 
   const result = await geminiRequest({
@@ -263,6 +393,10 @@ function buildDefaultPrompt(
     "title": "视频标题（≤20字）",
     "caption": "正文文案，50-100字，末尾附带5-8个可直接发布的平台标签，标签使用空格分隔，不要Markdown格式",
     "first_comment": "首评，30-60字"
+  },
+  "language": {
+    "spoken": "Language used by dialogue or voiceover in the final video",
+    "content": "Language used by title, caption, hashtags, and first_comment"
   }
 }`;
 

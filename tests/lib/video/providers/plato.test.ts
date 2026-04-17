@@ -42,6 +42,7 @@ test("platoProvider forwards provider-specific params like watermark", async () 
         name: "Sora",
         slug: "sora",
         provider: "plato",
+        capability: "video_generation",
         creditsPerGen: 10,
         isActive: true,
         apiKey: "test-key",

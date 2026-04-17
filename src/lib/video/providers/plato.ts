@@ -3,7 +3,16 @@ import type {
   VideoProviderAdapter,
   VideoProviderCapabilities,
 } from "@/lib/video/service";
-import type { TaskStatusResult, TerminalClass, VideoParams } from "@/lib/video/types";
+import { delayStaggeredSubmission } from "@/lib/tasks/batch-queue";
+import type { TaskStatusResult } from "@/lib/video/types";
+import {
+  classifyVideoProviderFailure,
+  extractProviderErrorMessage,
+  extractVideoUrlFromPayload,
+  isRetryableOverload,
+  toGrokRatio,
+  toPortraitLandscapeAspectRatio,
+} from "./shared";
 
 const DEFAULT_BASE_URL = "https://api.bltcy.ai";
 const CREATE_ENDPOINT = "/v2/videos/generations";
@@ -55,86 +64,6 @@ function getHdEnabled(): boolean {
   return raw === "1" || raw?.toLowerCase() === "true";
 }
 
-function toAspectRatio(
-  orientation: VideoParams["orientation"],
-): "9:16" | "16:9" {
-  return orientation === "portrait" ? "9:16" : "16:9";
-}
-
-function extractErrorMessage(payload: unknown): string {
-  if (payload && typeof payload === "object") {
-    const obj = payload as Record<string, unknown>;
-    const maybeError = obj.error;
-    if (maybeError && typeof maybeError === "object") {
-      const errorObj = maybeError as Record<string, unknown>;
-      const message = String(errorObj.message || errorObj.code || "").trim();
-      if (message) return message;
-    }
-    if ("message" in obj) {
-      const message = String(obj.message || "").trim();
-      if (message) return message;
-    }
-  }
-  return "Unknown API error";
-}
-
-function isRetryableOverload(status: number, message: string): boolean {
-  const normalized = message.toLowerCase();
-  return (
-    status === 429 ||
-    normalized.includes("负载已饱和") ||
-    normalized.includes("temporarily unavailable") ||
-    normalized.includes("try again later")
-  );
-}
-
-function classifyFailReason(failReason: string): {
-  retryable: boolean;
-  terminalClass: TerminalClass;
-} {
-  const msg = failReason.toLowerCase();
-
-  if (
-    msg.includes("prominent_people") ||
-    msg.includes("content policy") ||
-    msg.includes("safety") ||
-    msg.includes("违规") ||
-    msg.includes("审核")
-  ) {
-    return { retryable: false, terminalClass: "content_policy" };
-  }
-
-  if (
-    msg.includes("quota") ||
-    msg.includes("limit exceeded") ||
-    msg.includes("余额不足") ||
-    msg.includes("account")
-  ) {
-    return { retryable: false, terminalClass: "quota_exceeded" };
-  }
-
-  if (
-    msg.includes("timeout") ||
-    msg.includes("timed out") ||
-    msg.includes("超时")
-  ) {
-    return { retryable: true, terminalClass: "timeout" };
-  }
-
-  if (
-    msg.includes("server error") ||
-    msg.includes("internal") ||
-    msg.includes("500") ||
-    msg.includes("服务器") ||
-    msg.includes("provider")
-  ) {
-    return { retryable: true, terminalClass: "provider_error" };
-  }
-
-  // Default: treat as retryable unknown
-  return { retryable: true, terminalClass: "unknown" };
-}
-
 async function apiRequest(
   model: VideoModelRecord,
   method: string,
@@ -173,7 +102,7 @@ async function apiRequest(
       }
 
       if (!response.ok) {
-        const message = extractErrorMessage(payload);
+        const message = extractProviderErrorMessage(payload);
         const rawSnippet = text.trim().slice(0, 500);
         const detail = rawSnippet && rawSnippet !== message
           ? ` | body=${rawSnippet}`
@@ -206,33 +135,12 @@ function normalizeStatus(value: unknown): string {
   return String(value || "UNKNOWN").toUpperCase();
 }
 
-function extractVideoUrl(result: Record<string, unknown>): string | undefined {
-  const data = result.data;
-  if (data && typeof data === "object") {
-    for (const key of ["output", "video_url", "url"]) {
-      const value = (data as Record<string, unknown>)[key];
-      if (typeof value === "string" && value) return value;
-    }
-  }
-  for (const key of ["output", "video_url", "url"]) {
-    const value = result[key];
-    if (typeof value === "string" && value) return value;
-  }
-  return undefined;
-}
-
 function isGrokSlug(slug: string): boolean {
   return slug.toLowerCase().includes("grok");
 }
 
-/**
- * Map orientation → Grok ratio string.
- * portrait → "2:3", landscape → "3:2"
- */
-function toGrokRatio(
-  orientation: VideoParams["orientation"],
-): "2:3" | "3:2" {
-  return orientation === "portrait" ? "2:3" : "3:2";
+function isSoraSlug(slug: string): boolean {
+  return slug.toLowerCase().includes("sora");
 }
 
 /**
@@ -246,7 +154,7 @@ function inferPlatoCapabilities(model: VideoModelRecord): VideoProviderCapabilit
   const slug = model.slug.toLowerCase();
   if (isGrokSlug(slug)) {
     return {
-      allowedDurations: [8, 10],
+      allowedDurations: [6, 10],
       defaultDuration: 10,
     };
   }
@@ -278,41 +186,67 @@ export const platoProvider: VideoProviderAdapter = {
     const providerOptions = params.providerOptions ?? {};
 
     const grok = isGrokSlug(model.slug);
+    const sora = isSoraSlug(model.slug);
     const images = params.imageUrls ?? [];
 
-    const payload = grok
-      ? {
-          // Grok-specific payload: ratio / resolution / images (max 1)
-          prompt: params.prompt,
-          model: model.slug,
-          ratio: toGrokRatio(params.orientation),
-          resolution:
-            typeof providerOptions.resolution === "string"
-              ? providerOptions.resolution
-              : "720P",
-          duration: toGrokDuration(params.duration),
-          ...(images.length > 0 ? { images: [images[0]] } : {}),
-        }
-      : {
-          // Standard plato payload
-          ...providerOptions,
-          prompt: params.prompt,
-          model: model.slug,
-          images,
-          aspect_ratio: toAspectRatio(params.orientation),
-          duration: params.duration,
-          watermark:
-            typeof providerOptions.watermark === "boolean"
-              ? providerOptions.watermark
-              : true,
-          private:
-            typeof providerOptions.private === "boolean"
-              ? providerOptions.private
-              : false,
-          ...(getHdEnabled() ? { hd: true } : {}),
-        };
+    let payload: Record<string, unknown>;
+    if (grok) {
+      // Grok-specific payload: ratio / resolution / images (max 1)
+      payload = {
+        prompt: params.prompt,
+        model: model.slug,
+        ratio: toGrokRatio(params.orientation),
+        resolution:
+          typeof providerOptions.resolution === "string"
+            ? providerOptions.resolution
+            : "720P",
+        duration: toGrokDuration(params.duration),
+        ...(images.length > 0 ? { images: [images[0]] } : {}),
+      };
+    } else if (sora) {
+      // Sora requires input_reference as an array of objects
+      payload = {
+        ...providerOptions,
+        prompt: params.prompt,
+        model: model.slug,
+        aspect_ratio: toPortraitLandscapeAspectRatio(params.orientation),
+        duration: params.duration,
+        ...(images.length > 0
+          ? { input_reference: images.map((url) => ({ type: "image_url", image_url: url })) }
+          : {}),
+        watermark:
+          typeof providerOptions.watermark === "boolean"
+            ? providerOptions.watermark
+            : true,
+        private:
+          typeof providerOptions.private === "boolean"
+            ? providerOptions.private
+            : false,
+        ...(getHdEnabled() ? { hd: true } : {}),
+      };
+    } else {
+      // Standard plato payload
+      payload = {
+        ...providerOptions,
+        prompt: params.prompt,
+        model: model.slug,
+        images,
+        aspect_ratio: toPortraitLandscapeAspectRatio(params.orientation),
+        duration: params.duration,
+        watermark:
+          typeof providerOptions.watermark === "boolean"
+            ? providerOptions.watermark
+            : true,
+        private:
+          typeof providerOptions.private === "boolean"
+            ? providerOptions.private
+            : false,
+        ...(getHdEnabled() ? { hd: true } : {}),
+      };
+    }
 
     for (let index = 0; index < params.count; index += 1) {
+      await delayStaggeredSubmission(index);
       const result = await apiRequest(model, "POST", CREATE_ENDPOINT, payload);
       const taskId = String(result.task_id || result.id || "");
       if (!taskId) {
@@ -340,14 +274,15 @@ export const platoProvider: VideoProviderAdapter = {
         taskId,
         status: "SUCCESS",
         progress: "100%",
-        url: extractVideoUrl(result),
+        url: extractVideoUrlFromPayload(result),
       };
     }
     if (FAILURE_STATES.has(status)) {
       const failReason = String(
         result.fail_reason || result.message || "Video task failed",
       );
-      const { retryable, terminalClass } = classifyFailReason(failReason);
+      const { retryable, terminalClass } =
+        classifyVideoProviderFailure(failReason);
       return {
         taskId,
         status: "FAILED",

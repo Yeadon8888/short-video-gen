@@ -4,7 +4,12 @@ const HASHTAG_LIMIT = 8;
 
 export function getTaskSourceModeLabel(
   sourceMode?: TaskParamsSnapshot["sourceMode"],
+  taskType?: string,
 ): string {
+  // New task types take priority
+  if (taskType === "scene_gen") return "商品组图";
+  if (taskType === "analyze") return "视频拆解";
+
   switch (sourceMode) {
     case "theme":
       return "主题原创";

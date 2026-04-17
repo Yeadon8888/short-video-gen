@@ -6,11 +6,32 @@ import {
   resolveModelSelectionPatch,
   type GenerateModelOption,
 } from "@/components/generate/model-selection";
+import type { GenerateTab } from "@/components/generate/generate-config";
+import type { VideoDuration } from "@/lib/video/types";
 
 const selectClass =
   "rounded-full bg-[var(--vc-bg-root)] border border-[var(--vc-border)] px-3 py-2 text-xs text-white outline-none cursor-pointer transition-all duration-150 hover:border-[var(--vc-accent)]/50 focus:border-[var(--vc-accent)] sm:text-sm sm:px-4";
 
-export function ParamBar() {
+const LANGUAGE_OPTIONS: Array<{
+  value: GenerateParams["outputLanguage"];
+  label: string;
+}> = [
+  { value: "auto", label: "语言自动" },
+  { value: "en", label: "英语" },
+  { value: "es-mx", label: "墨西哥西语" },
+  { value: "es", label: "西班牙语" },
+  { value: "ms", label: "马来西亚语" },
+  { value: "en-my", label: "马来西亚英语" },
+  { value: "pt-br", label: "巴西葡语" },
+  { value: "id", label: "印尼语" },
+  { value: "ar", label: "阿拉伯语" },
+];
+
+export function ParamBar(props: {
+  activeTab: GenerateTab;
+  batchProductCount?: number;
+  batchUnitsPerProduct?: number;
+}) {
   const params = useGenerateStore((s) => s.params);
   const setParams = useGenerateStore((s) => s.setParams);
   const [modelOptions, setModelOptions] = useState<GenerateModelOption[]>([]);
@@ -53,7 +74,12 @@ export function ParamBar() {
     }
   }, [modelOptions, params.duration, params.model, setParams]);
 
-  const totalCredits = (currentModel?.creditsPerGen ?? 0) * params.count;
+  const effectiveCount =
+    props.activeTab === "batch"
+      ? Math.max(1, props.batchProductCount ?? 0) *
+        Math.max(1, props.batchUnitsPerProduct ?? 1)
+      : params.count;
+  const totalCredits = (currentModel?.creditsPerGen ?? 0) * effectiveCount;
   const modelSelectDisabled = modelOptions.length === 0;
 
   return (
@@ -80,7 +106,9 @@ export function ParamBar() {
       ) : (
         <select
           value={params.duration}
-          onChange={(e) => setParams({ duration: Number(e.target.value) as 8 | 10 | 15 })}
+          onChange={(e) =>
+            setParams({ duration: Number(e.target.value) as VideoDuration })
+          }
           className={selectClass}
           disabled={!currentModel}
         >
@@ -94,17 +122,23 @@ export function ParamBar() {
         </select>
       )}
 
-      <select
-        value={params.count}
-        onChange={(e) => setParams({ count: Number(e.target.value) })}
-        className={selectClass}
-      >
-        {[1, 2, 3, 5, 10].map((n) => (
-          <option key={n} value={n}>
-            ×{n}
-          </option>
-        ))}
-      </select>
+      {props.activeTab !== "batch" ? (
+        <select
+          value={params.count}
+          onChange={(e) => setParams({ count: Number(e.target.value) })}
+          className={selectClass}
+        >
+          {[1, 2, 3, 5, 10].map((n) => (
+            <option key={n} value={n}>
+              ×{n}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <span className={`${selectClass} cursor-default opacity-60`}>
+          总视频 {effectiveCount}
+        </span>
+      )}
 
       <select
         value={params.platform}
@@ -115,6 +149,20 @@ export function ParamBar() {
       >
         <option value="douyin">抖音</option>
         <option value="tiktok">TikTok</option>
+      </select>
+
+      <select
+        value={params.outputLanguage}
+        onChange={(e) =>
+          setParams({ outputLanguage: e.target.value as GenerateParams["outputLanguage"] })
+        }
+        className={selectClass}
+      >
+        {LANGUAGE_OPTIONS.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
       </select>
 
       <select

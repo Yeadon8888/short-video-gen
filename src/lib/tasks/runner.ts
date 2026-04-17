@@ -3,15 +3,18 @@ import { db } from "@/lib/db";
 import { taskGroups, taskItems, taskSlots, tasks } from "@/lib/db/schema";
 import {
   ACTIVE_TASK_STATUSES,
+  failTaskAndRefund,
   finalizeTaskIfTerminal,
 } from "@/lib/tasks/reconciliation";
 import { processPendingBatchTasks } from "@/lib/tasks/batch-processing";
+import { getMaxBatchGroupSubmissionsPerTick } from "@/lib/tasks/batch-queue";
 import { processDueScheduledTasks } from "@/lib/tasks/scheduled";
 import { queryVideoTaskStatus } from "@/lib/video/service";
 import {
   advanceSlotOnResult,
   expireDeadlineSlots,
   getActiveProviderTaskIds,
+  refillPendingSlotsIfCapacityAvailable,
 } from "@/lib/tasks/fulfillment";
 import { processTimedOutTasks } from "@/lib/tasks/timeout";
 
@@ -46,7 +49,10 @@ export async function runTaskMaintenance(options?: {
     if (group.status !== "pending" && group.status !== "generating") continue;
     await processPendingBatchTasks({
       taskGroupId: group.id,
-      limit: options?.groupProcessLimit ?? 2,
+      limit: Math.min(
+        options?.groupProcessLimit ?? getMaxBatchGroupSubmissionsPerTick(),
+        getMaxBatchGroupSubmissionsPerTick(),
+      ),
     });
     processedGroups++;
   }
@@ -120,6 +126,10 @@ export async function runTaskMaintenance(options?: {
         }
       }
 
+      if (activeItems.length === 0) {
+        await refillPendingSlotsIfCapacityAvailable(task.id);
+      }
+
       polledTasks++;
       continue;
     }
@@ -132,7 +142,29 @@ export async function runTaskMaintenance(options?: {
     const pendingItems = items.filter(
       (item) => item.providerTaskId && item.status !== "SUCCESS" && item.status !== "FAILED",
     );
-    if (pendingItems.length === 0 && items.length === 0) continue;
+    if (items.length === 0) {
+      // Grace period: don't fail tasks created within the last 2 minutes.
+      // This prevents a race condition where the runner fires before
+      // task_items are fully inserted after provider submission.
+      const taskAge = Date.now() - new Date(task.createdAt).getTime();
+      if (taskAge < 2 * 60 * 1000) {
+        continue;
+      }
+
+      const refunded = await failTaskAndRefund({
+        taskId: task.id,
+        userId: task.userId,
+        refundAmount: task.creditsCost,
+        errorMessage: "任务未成功提交到视频供应商，积分已自动退还",
+        refundReason: "任务提交缺失自动退款",
+        allowedStatuses: ACTIVE_TASK_STATUSES,
+      });
+
+      if (refunded) {
+        polledTasks++;
+      }
+      continue;
+    }
 
     for (const item of pendingItems) {
       try {

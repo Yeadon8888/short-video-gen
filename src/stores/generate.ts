@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { FulfillmentMode } from "@/lib/video/types";
+import type { FulfillmentMode, OutputLanguage, VideoDuration } from "@/lib/video/types";
 
 export interface ScriptResult {
   creative_points: string[];
@@ -22,9 +22,10 @@ export interface ScriptResult {
 
 export interface GenerateParams {
   orientation: "portrait" | "landscape";
-  duration: 8 | 10 | 15;
+  duration: VideoDuration;
   count: number;
   platform: "douyin" | "tiktok";
+  outputLanguage: OutputLanguage;
   model: string;
 }
 
@@ -90,7 +91,8 @@ const defaultParams: GenerateParams = {
   orientation: "portrait",
   duration: 10,
   count: 1,
-  platform: "douyin",
+  platform: "tiktok",
+  outputLanguage: "auto",
   model: "",
 };
 

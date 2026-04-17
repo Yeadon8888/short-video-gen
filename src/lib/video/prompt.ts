@@ -49,6 +49,9 @@ export function buildScriptInstruction(params: {
 export function buildFinalVideoPrompt(params: {
   scriptPrompt: string;
   referenceImageCount?: number;
+  // Accepted to preserve caller API. Current implementation ignores it;
+  // language handling is applied upstream via resolveLanguageSpec.
+  outputLanguage?: unknown;
 }): string {
   const basePrompt = normalizePrompt(params.scriptPrompt);
   const referenceImageCount = params.referenceImageCount ?? 0;

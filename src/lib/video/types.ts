@@ -1,10 +1,12 @@
+export type VideoDuration = 4 | 5 | 6 | 8 | 10 | 15;
+
 // ─── Video generation types ───
 
 export interface VideoParams {
   prompt: string;
   imageUrls?: string[];
   orientation: "portrait" | "landscape";
-  duration: 8 | 10 | 15;
+  duration: VideoDuration;
   count: number;
   model?: string;
   providerOptions?: Record<string, unknown>;
@@ -58,7 +60,22 @@ export interface ScriptResult {
     caption: string;
     first_comment: string;
   };
+  language?: {
+    spoken?: string;
+    content?: string;
+  };
 }
+
+export type OutputLanguage =
+  | "auto"
+  | "en"
+  | "es-mx"
+  | "es"
+  | "ms"
+  | "en-my"
+  | "pt-br"
+  | "id"
+  | "ar";
 
 export type GenerateSourceMode = "theme" | "url" | "upload" | "batch";
 export type ImageSelectionMode = "single" | "sequence";
@@ -74,6 +91,8 @@ export interface GenerateInputSnapshot {
   primaryInput?: string;
   creativeBrief?: string;
   batchTheme?: string;
+  batchUnitsPerProduct?: number;
+  batchProductCount?: number;
   selectionMode?: ImageSelectionMode;
   selectedImageIds?: string[];
   selectedAssets?: SelectedAssetSnapshot[];
@@ -86,14 +105,17 @@ export interface GenerateInputSnapshot {
 
 export interface TaskParamsSnapshot {
   orientation: "portrait" | "landscape";
-  duration: 8 | 10 | 15;
+  duration: VideoDuration;
   count: number;
   platform: "douyin" | "tiktok";
+  outputLanguage?: OutputLanguage;
   model: string;
   imageUrls?: string[];
   sourceMode?: GenerateSourceMode;
   creativeBrief?: string;
   batchTheme?: string;
+  batchUnitsPerProduct?: number;
+  batchProductCount?: number;
   selectionMode?: ImageSelectionMode;
   selectedImageIds?: string[];
   selectedAssets?: SelectedAssetSnapshot[];
@@ -121,9 +143,10 @@ export interface GenerateRequest {
   fulfillmentMode?: FulfillmentMode;
   params: {
     orientation: "portrait" | "landscape";
-    duration: 8 | 10 | 15;
+    duration: VideoDuration;
     count: number;
     platform?: "douyin" | "tiktok";
+    outputLanguage?: OutputLanguage;
     model?: string;
   };
 }
@@ -132,12 +155,15 @@ export interface BatchGenerateRequest {
   sourceMode: "batch";
   batchTheme: string;
   selectedImageIds: string[];
+  unitsPerProduct?: number;
   selectionMode: ImageSelectionMode;
+  fulfillmentMode?: FulfillmentMode;
   params: {
     orientation: "portrait" | "landscape";
-    duration: 8 | 10 | 15;
+    duration: VideoDuration;
     count: number;
     platform?: "douyin" | "tiktok";
+    outputLanguage?: OutputLanguage;
     model?: string;
   };
 }

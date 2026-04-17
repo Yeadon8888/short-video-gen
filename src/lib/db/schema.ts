@@ -14,7 +14,7 @@ import {
 
 export const userRoleEnum = pgEnum("user_role", ["admin", "user"]);
 export const userStatusEnum = pgEnum("user_status", ["active", "suspended"]);
-export const taskTypeEnum = pgEnum("task_type", ["theme", "remix", "url"]);
+export const taskTypeEnum = pgEnum("task_type", ["theme", "remix", "url", "scene_gen", "analyze"]);
 export const taskStatusEnum = pgEnum("task_status", [
   "pending",
   "analyzing",
@@ -29,7 +29,15 @@ export const creditTxnTypeEnum = pgEnum("credit_txn_type", [
   "consume",  // 生成消费
   "refund",   // 退款
   "adjust",   // 管理员手动调整
+  "payment",  // 支付充值
 ]);
+export const paymentOrderStatusEnum = pgEnum("payment_order_status", [
+  "pending",
+  "paid",
+  "failed",
+  "closed",
+]);
+export const paymentProviderEnum = pgEnum("payment_provider", ["alipay"]);
 export const assetTypeEnum = pgEnum("asset_type", ["image", "video"]);
 export const fulfillmentModeEnum = pgEnum("fulfillment_mode", [
   "standard",
@@ -47,6 +55,17 @@ export const terminalClassEnum = pgEnum("terminal_class", [
   "provider_error",  // provider 内部错误，可重试
   "timeout",         // 超时，可重试
   "unknown",         // 未知，保守重试
+]);
+export const modelCapabilityEnum = pgEnum("model_capability", [
+  "video_generation",
+  "image_edit",
+  "script_generation",
+]);
+export const assetTransformStatusEnum = pgEnum("asset_transform_status", [
+  "pending",
+  "processing",
+  "succeeded",
+  "failed",
 ]);
 
 // ─── Users ───
@@ -71,6 +90,7 @@ export const models = pgTable("models", {
   name: varchar("name", { length: 100 }).notNull(),
   slug: varchar("slug", { length: 50 }).unique().notNull(),
   provider: varchar("provider", { length: 50 }).notNull(), // "plato" | "veo" etc.
+  capability: modelCapabilityEnum("capability").default("video_generation").notNull(),
   creditsPerGen: integer("credits_per_gen").default(10).notNull(),
   isActive: boolean("is_active").default(true).notNull(),
   /** Per-model API key (overrides env `VIDEO_API_KEY` if set) */
@@ -100,10 +120,13 @@ export const taskGroups = pgTable("task_groups", {
   selectionMode: varchar("selection_mode", { length: 20 }),
   paramsJson: jsonb("params_json").$type<{
     orientation: "portrait" | "landscape";
-    duration: 8 | 10 | 15;
+    duration: 4 | 5 | 6 | 8 | 10 | 15;
     count: number;
     platform: "douyin" | "tiktok";
+    outputLanguage?: "auto" | "en" | "es-mx" | "es" | "ms" | "en-my" | "pt-br" | "id" | "ar";
     model: string;
+    batchUnitsPerProduct?: number;
+    batchProductCount?: number;
     selectedImageIds?: string[];
     selectedAssets?: { id: string; url: string; filename?: string | null }[];
   }>(),
@@ -130,17 +153,21 @@ export const tasks = pgTable("tasks", {
   soraPrompt: text("sora_prompt"),
   scriptJson: jsonb("script_json"),
   resultUrls: jsonb("result_urls").$type<string[]>().default([]),
+  resultAssetKeys: jsonb("result_asset_keys").$type<string[]>().default([]),
   creditsCost: integer("credits_cost").default(0).notNull(),
   paramsJson: jsonb("params_json").$type<{
     orientation: "portrait" | "landscape";
-    duration: 8 | 10 | 15;
+    duration: 4 | 5 | 6 | 8 | 10 | 15;
     count: number;
     platform: "douyin" | "tiktok";
+    outputLanguage?: "auto" | "en" | "es-mx" | "es" | "ms" | "en-my" | "pt-br" | "id" | "ar";
     model: string;
     imageUrls?: string[];
     sourceMode?: "theme" | "url" | "upload" | "batch";
     creativeBrief?: string;
     batchTheme?: string;
+    batchUnitsPerProduct?: number;
+    batchProductCount?: number;
     selectionMode?: "single" | "sequence";
     selectedImageIds?: string[];
     selectedAssets?: { id: string; url: string; filename?: string | null }[];
@@ -228,6 +255,27 @@ export const creditTxns = pgTable("credit_txns", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+// ─── Payment Orders (支付订单) ───
+
+export const paymentOrders = pgTable("payment_orders", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  provider: paymentProviderEnum("provider").default("alipay").notNull(),
+  status: paymentOrderStatusEnum("status").default("pending").notNull(),
+  outTradeNo: varchar("out_trade_no", { length: 64 }).unique().notNull(),
+  providerTradeNo: varchar("provider_trade_no", { length: 64 }),
+  subject: varchar("subject", { length: 256 }).notNull(),
+  packageId: varchar("package_id", { length: 64 }),
+  amountFen: integer("amount_fen").notNull(),
+  credits: integer("credits").notNull(),
+  paymentUrl: text("payment_url"),
+  rawNotify: jsonb("raw_notify"),
+  paidAt: timestamp("paid_at", { withTimezone: true }),
+  expiredAt: timestamp("expired_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 // ─── User Assets (用户上传的参考图/视频) ───
 
 export const userAssets = pgTable("user_assets", {
@@ -238,6 +286,46 @@ export const userAssets = pgTable("user_assets", {
   url: text("url").notNull(),
   filename: varchar("filename", { length: 255 }),
   sizeBytes: integer("size_bytes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ─── Asset Transform Jobs (产品图异步转图任务) ───
+
+export const assetTransformJobs = pgTable("asset_transform_jobs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  sourceAssetId: uuid("source_asset_id")
+    .references(() => userAssets.id, { onDelete: "cascade" })
+    .notNull(),
+  targetAssetId: uuid("target_asset_id").references(() => userAssets.id, {
+    onDelete: "set null",
+  }),
+  modelId: uuid("model_id").references(() => models.id),
+  status: assetTransformStatusEnum("status").default("pending").notNull(),
+  creditsCost: integer("credits_cost").default(0).notNull(),
+  errorMessage: text("error_message"),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ─── Gallery Items (灵感广场) ───
+
+export const galleryItems = pgTable("gallery_items", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  taskId: uuid("task_id").references(() => tasks.id, { onDelete: "cascade" }).notNull(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  title: varchar("title", { length: 200 }).notNull(),
+  videoUrl: text("video_url").notNull(),
+  thumbnailUrl: text("thumbnail_url"),
+  prompt: text("prompt"),
+  scriptJson: jsonb("script_json"),
+  modelSlug: varchar("model_slug", { length: 50 }),
+  tags: jsonb("tags").$type<string[]>().default([]),
+  viewCount: integer("view_count").default(0).notNull(),
+  likeCount: integer("like_count").default(0).notNull(),
+  isApproved: boolean("is_approved").default(true).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -273,6 +361,10 @@ export type TaskSlot = typeof taskSlots.$inferSelect;
 export type NewTaskSlot = typeof taskSlots.$inferInsert;
 export type TaskItem = typeof taskItems.$inferSelect;
 export type CreditTxn = typeof creditTxns.$inferSelect;
+export type PaymentOrder = typeof paymentOrders.$inferSelect;
 export type UserAsset = typeof userAssets.$inferSelect;
+export type AssetTransformJob = typeof assetTransformJobs.$inferSelect;
+export type GalleryItem = typeof galleryItems.$inferSelect;
+export type NewGalleryItem = typeof galleryItems.$inferInsert;
 export type SystemConfigRow = typeof systemConfig.$inferSelect;
 export type Announcement = typeof announcements.$inferSelect;

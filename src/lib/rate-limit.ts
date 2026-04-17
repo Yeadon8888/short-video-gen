@@ -101,3 +101,9 @@ export const authLimiter = createRateLimiter({
   limit: 10,
   windowMs: 60_000,
 });
+
+/** Analyze API: 5 requests per hour per IP */
+export const analyzeLimiter = createRateLimiter({
+  limit: 5,
+  windowMs: 3_600_000,
+});

@@ -27,6 +27,7 @@ import {
   submitPendingSlots,
 } from "@/lib/tasks/fulfillment";
 import { computeDeliveryDeadline } from "@/lib/tasks/retry-policy";
+import type { OutputLanguage } from "@/lib/video/types";
 
 export const maxDuration = 300; // Vercel max
 const MAX_REFERENCE_IMAGES = 4;
@@ -45,6 +46,14 @@ function formatShanghaiTime(date: Date): string {
     minute: "2-digit",
     hour12: false,
   }).format(date);
+}
+
+export function resolveOutputLanguage(
+  outputLanguage: OutputLanguage | undefined,
+  platform: "douyin" | "tiktok" | undefined,
+): OutputLanguage {
+  if (outputLanguage && outputLanguage !== "auto") return outputLanguage;
+  return platform === "douyin" ? "auto" : "en";
 }
 
 export async function POST(req: NextRequest) {
@@ -82,6 +91,10 @@ export async function POST(req: NextRequest) {
     sourceMode ?? (type === "video_key" ? "upload" : type);
   const effectiveCreativeBrief = creativeBrief?.trim() || modification?.trim() || undefined;
   const normalizedSelectedImageIds = selectedImageIds?.slice(0, 1);
+  const resolvedOutputLanguage = resolveOutputLanguage(
+    params.outputLanguage,
+    params.platform,
+  );
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -212,6 +225,7 @@ export async function POST(req: NextRequest) {
           imageBuffers,
           promptTemplate,
           platform: params.platform,
+          outputLanguage: resolvedOutputLanguage,
         });
 
         log(`Gemini 生成完成，共 ${scriptResult.shots?.length ?? 0} 个镜头`);
@@ -224,6 +238,7 @@ export async function POST(req: NextRequest) {
               scriptResult.full_sora_prompt,
               customPrompts.copy_generation,
               params.platform,
+              resolvedOutputLanguage,
             );
             scriptResult.copy = copy;
             log("自定义文案生成完成");
@@ -235,6 +250,7 @@ export async function POST(req: NextRequest) {
         const soraPrompt = buildFinalVideoPrompt({
           scriptPrompt: scriptResult.full_sora_prompt,
           referenceImageCount: referenceImageUrls.length,
+          outputLanguage: resolvedOutputLanguage,
         });
 
         send({
@@ -280,7 +296,8 @@ export async function POST(req: NextRequest) {
                   orientation: params.orientation,
                   duration: params.duration,
                   count,
-                  platform: params.platform ?? "douyin",
+                  platform: params.platform ?? "tiktok",
+                  outputLanguage: resolvedOutputLanguage,
                   model: modelSlug,
                   imageUrls: referenceImageUrls,
                   sourceMode: effectiveSourceMode,
@@ -375,7 +392,8 @@ export async function POST(req: NextRequest) {
                 orientation: params.orientation,
                 duration: params.duration,
                 count,
-                platform: params.platform ?? "douyin",
+                platform: params.platform ?? "tiktok",
+                outputLanguage: resolvedOutputLanguage,
                 model: modelSlug,
                 imageUrls: referenceImageUrls,
                 sourceMode: effectiveSourceMode,
@@ -467,6 +485,7 @@ export async function POST(req: NextRequest) {
             const submitted = await createVideoTasks({
               model: modelRow,
               request: videoRequest,
+              userId: user.id,
             });
             providerTaskIds = submitted.providerTaskIds;
             resolvedVideoParams = submitted.resolvedParams;

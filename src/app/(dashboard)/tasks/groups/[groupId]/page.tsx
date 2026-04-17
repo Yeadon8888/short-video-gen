@@ -6,7 +6,12 @@ import { db } from "@/lib/db";
 import { taskGroups, tasks } from "@/lib/db/schema";
 import type { TaskParamsSnapshot } from "@/lib/video/types";
 import { CopyTextButton } from "@/components/ui/CopyTextButton";
+import { TaskGroupDownloadButton } from "@/components/tasks/TaskGroupDownloadButton";
 import { buildGenerateReplayHref } from "@/lib/generate/preset";
+import {
+  computeBatchTotalVideoCount,
+  resolveBatchUnitsPerProduct,
+} from "@/lib/tasks/batch-math";
 
 function Section({
   title,
@@ -49,24 +54,36 @@ export default async function TaskGroupDetailPage({
 
   const paramsJson = (group.paramsJson ?? {}) as TaskParamsSnapshot;
   const selectedAssets = paramsJson.selectedAssets ?? [];
+  const batchUnitsPerProduct = resolveBatchUnitsPerProduct(paramsJson);
+  const batchProductCount = paramsJson.batchProductCount ?? selectedAssets.length;
+  const targetVideoCount =
+    group.requestedCount ??
+    computeBatchTotalVideoCount(batchProductCount, batchUnitsPerProduct);
   const productOrderText = selectedAssets
     .map((asset, index) => `${index + 1}. ${asset.filename || asset.id}`)
     .join("\n");
   const replayHref = buildGenerateReplayHref({
     tab: "batch",
     batchTheme: group.batchTheme ?? undefined,
+    batchUnitsPerProduct,
     batchImageIds: selectedAssets.map((asset) => asset.id),
     params: {
       orientation: paramsJson.orientation,
       duration: paramsJson.duration,
-      count: group.requestedCount,
       platform: paramsJson.platform,
+      outputLanguage: paramsJson.outputLanguage,
       model: paramsJson.model,
     },
   });
 
   return (
     <div className="mx-auto max-w-5xl space-y-5">
+      <Link
+        href="/tasks"
+        className="inline-flex items-center gap-1 text-sm text-slate-400 transition-colors hover:text-white"
+      >
+        ← 返回任务列表
+      </Link>
       <div className="space-y-2">
         <p className="text-xs uppercase tracking-[0.2em] text-[var(--vc-text-dim)]">
           批量任务组
@@ -82,6 +99,10 @@ export default async function TaskGroupDetailPage({
           >
             按此配置再来一组
           </Link>
+          <TaskGroupDownloadButton
+            groupId={group.id}
+            disabled={group.successCount === 0}
+          />
           {group.batchTheme && <CopyTextButton text={group.batchTheme} />}
           {productOrderText && <CopyTextButton text={productOrderText} />}
         </div>
@@ -91,8 +112,11 @@ export default async function TaskGroupDetailPage({
         <div className="grid gap-3 text-sm text-[var(--vc-text-secondary)] sm:grid-cols-2 lg:grid-cols-4">
           <div>模型：{paramsJson.model || "—"}</div>
           <div>平台：{paramsJson.platform || "—"}</div>
+          <div>语言：{paramsJson.outputLanguage || "auto"}</div>
           <div>时长：{paramsJson.duration ?? "—"} 秒</div>
-          <div>计划数量：{group.requestedCount}</div>
+          <div>商品数：{batchProductCount}</div>
+          <div>每商品条数：{batchUnitsPerProduct}</div>
+          <div>计划总视频：{targetVideoCount}</div>
           <div>成功：{group.successCount}</div>
           <div>失败：{group.failedCount}</div>
           <div>选图策略：{group.selectionMode || "sequence"}</div>
@@ -145,7 +169,7 @@ export default async function TaskGroupDetailPage({
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-medium text-white">
-                      第 {index + 1} 条 · 状态 {task.status}
+                      第 {index + 1} 个商品 · 状态 {task.status}
                     </p>
                     <p className="text-xs text-[var(--vc-text-dim)]">
                       产品图序号 {typeof taskParams.assignedAssetIndex === "number" ? taskParams.assignedAssetIndex + 1 : "—"}

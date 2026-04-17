@@ -22,10 +22,16 @@ import type { TaskSlot, Task } from "@/lib/db/schema";
 import type { TerminalClass } from "@/lib/video/types";
 import { createVideoTasks, getVideoModelById } from "@/lib/video/service";
 import {
+  delayStaggeredSubmission,
+  getMaxBatchSlotSubmissionsPerTick,
+} from "@/lib/tasks/batch-queue";
+import {
   computeDeliveryDeadline,
   shouldRetrySlot,
 } from "@/lib/tasks/retry-policy";
 import { recomputeTaskGroupSummary } from "@/lib/tasks/groups";
+import { persistGeneratedVideos } from "@/lib/tasks/result-assets";
+import type { VideoDuration } from "@/lib/video/types";
 
 // ─── Slot initialization ───────────────────────────────────────────────────
 
@@ -62,7 +68,7 @@ export async function submitSlotAttempt(params: {
 
   const p = task.paramsJson as {
     orientation: "portrait" | "landscape";
-    duration: 8 | 10 | 15;
+    duration: VideoDuration;
     count: number;
     platform: "douyin" | "tiktok";
     model: string;
@@ -86,6 +92,7 @@ export async function submitSlotAttempt(params: {
         count: 1,
         model: p.model,
       },
+      userId: task.userId,
     });
     providerTaskIds = submitted.providerTaskIds;
   } catch {
@@ -178,6 +185,11 @@ export async function advanceSlotOnResult(params: {
       successfulCount: newSuccessCount,
     });
 
+    await refillPendingSlotsIfCapacityAvailable(task.id);
+    if (task.taskGroupId) {
+      await recomputeTaskGroupSummary(task.taskGroupId);
+    }
+
     return { slotStatus: "success" };
   }
 
@@ -216,6 +228,10 @@ export async function advanceSlotOnResult(params: {
       .set({ status: "failed", completedAt: new Date() })
       .where(eq(taskSlots.id, slot.id));
     await maybeFinalizeFulfillmentTask(task);
+    await refillPendingSlotsIfCapacityAvailable(task.id);
+    if (task.taskGroupId) {
+      await recomputeTaskGroupSummary(task.taskGroupId);
+    }
     return { slotStatus: "failed" };
   }
 
@@ -240,10 +256,69 @@ export async function advanceSlotOnResult(params: {
       .set({ status: "failed", completedAt: new Date() })
       .where(eq(taskSlots.id, slot.id));
     await maybeFinalizeFulfillmentTask(task);
+    if (task.taskGroupId) {
+      await recomputeTaskGroupSummary(task.taskGroupId);
+    }
     return { slotStatus: "failed" };
   }
 
+  if (task.taskGroupId) {
+    await recomputeTaskGroupSummary(task.taskGroupId);
+  }
+
   return { slotStatus: "retrying", newProviderTaskId: attempt.providerTaskId };
+}
+
+export async function refillPendingSlotsIfCapacityAvailable(taskId: string): Promise<void> {
+  const [task] = await db
+    .select({
+      id: tasks.id,
+      userId: tasks.userId,
+      modelId: tasks.modelId,
+      soraPrompt: tasks.soraPrompt,
+      paramsJson: tasks.paramsJson,
+      status: tasks.status,
+    })
+    .from(tasks)
+    .where(eq(tasks.id, taskId))
+    .limit(1);
+
+  if (!task) return;
+  if (!["pending", "analyzing", "generating", "polling"].includes(task.status)) return;
+
+  const activeSlots = await db
+    .select({ id: taskSlots.id })
+    .from(taskSlots)
+    .where(
+      and(
+        eq(taskSlots.taskId, taskId),
+        eq(taskSlots.status, "submitted"),
+      ),
+    );
+
+  const pendingSlots = await db
+    .select({ id: taskSlots.id })
+    .from(taskSlots)
+    .where(
+      and(
+        eq(taskSlots.taskId, taskId),
+        eq(taskSlots.status, "pending"),
+      ),
+    );
+
+  if (pendingSlots.length === 0) return;
+
+  const submissionLimit = Math.max(
+    0,
+    Math.min(
+      getMaxBatchSlotSubmissionsPerTick() - activeSlots.length,
+      pendingSlots.length,
+    ),
+  );
+
+  if (submissionLimit <= 0) return;
+
+  await submitPendingSlots(task, { limit: submissionLimit });
 }
 
 // ─── Task finalization ─────────────────────────────────────────────────────
@@ -304,6 +379,7 @@ export async function maybeFinalizeFulfillmentTask(
       .set({
         status: finalStatus,
         resultUrls: successUrls,
+        resultAssetKeys: [],
         creditsCost: finalCreditsCost,
         completedAt: new Date(),
         errorMessage,
@@ -340,6 +416,22 @@ export async function maybeFinalizeFulfillmentTask(
 
   if (task.taskGroupId) {
     await recomputeTaskGroupSummary(task.taskGroupId);
+  }
+
+  if (successUrls.length > 0) {
+    const persisted = await persistGeneratedVideos({
+      userId: task.userId,
+      taskId: task.id,
+      urls: successUrls,
+    });
+
+    await db
+      .update(tasks)
+      .set({
+        resultUrls: persisted.urls,
+        resultAssetKeys: persisted.storageKeys,
+      })
+      .where(eq(tasks.id, task.id));
   }
 
   return true;
@@ -415,14 +507,26 @@ export async function expireDeadlineSlots(
  */
 export async function submitPendingSlots(
   task: Pick<Task, "id" | "userId" | "modelId" | "soraPrompt" | "paramsJson">,
+  options?: { limit?: number },
 ): Promise<string[]> {
+  const limit = Math.max(
+    1,
+    Math.min(
+      options?.limit ?? getMaxBatchSlotSubmissionsPerTick(),
+      getMaxBatchSlotSubmissionsPerTick(),
+    ),
+  );
   const pendingSlots = await db
     .select()
     .from(taskSlots)
-    .where(and(eq(taskSlots.taskId, task.id), eq(taskSlots.status, "pending")));
+    .where(and(eq(taskSlots.taskId, task.id), eq(taskSlots.status, "pending")))
+    .limit(limit);
 
   const providerTaskIds: string[] = [];
+  let submissionIndex = 0;
   for (const slot of pendingSlots) {
+    await delayStaggeredSubmission(submissionIndex);
+    submissionIndex += 1;
     const result = await submitSlotAttempt({ task, slot });
     if (result) providerTaskIds.push(result.providerTaskId);
   }

@@ -7,7 +7,13 @@ import { taskItems, tasks } from "@/lib/db/schema";
 import type { ScriptResult, TaskParamsSnapshot } from "@/lib/video/types";
 import { CopyTextButton } from "@/components/ui/CopyTextButton";
 import { TaskDetailAutoRefresh } from "@/components/tasks/TaskDetailAutoRefresh";
+import { TaskZipDownloadButton } from "@/components/tasks/TaskZipDownloadButton";
 import { buildGenerateReplayHref } from "@/lib/generate/preset";
+import { ShareToGalleryButton } from "@/components/tasks/ShareToGalleryButton";
+import {
+  computeBatchTotalVideoCount,
+  resolveBatchUnitsPerProduct,
+} from "@/lib/tasks/batch-math";
 import {
   buildPublishHashtagText,
   extractHashtags,
@@ -70,18 +76,27 @@ export default async function TaskDetailPage({
   const script = (task.scriptJson ?? null) as ScriptResult | null;
   const hashtags = extractHashtags(script?.copy?.caption);
   const hashtagText = buildPublishHashtagText(script?.copy?.caption);
-  const sourceModeLabel = getTaskSourceModeLabel(paramsJson.sourceMode);
+  const sourceModeLabel = getTaskSourceModeLabel(paramsJson.sourceMode, task.type);
+  const isBatchTask = paramsJson.sourceMode === "batch";
+  const batchUnitsPerProduct = resolveBatchUnitsPerProduct(paramsJson);
+  const batchProductCount =
+    paramsJson.batchProductCount ?? paramsJson.selectedAssets?.length ?? 1;
+  const batchTargetCount =
+    paramsJson.batchTotal ??
+    task.requestedCount ??
+    computeBatchTotalVideoCount(batchProductCount, batchUnitsPerProduct);
   const replayHref = buildGenerateReplayHref(
-    paramsJson.sourceMode === "batch"
+    isBatchTask
       ? {
           tab: "batch",
           batchTheme: paramsJson.batchTheme ?? task.inputText ?? undefined,
+          batchUnitsPerProduct,
           batchImageIds: paramsJson.selectedImageIds ?? [],
           params: {
             orientation: paramsJson.orientation,
             duration: paramsJson.duration,
-            count: paramsJson.batchTotal ?? paramsJson.count,
             platform: paramsJson.platform,
+            outputLanguage: paramsJson.outputLanguage,
             model: paramsJson.model,
           },
         }
@@ -96,6 +111,7 @@ export default async function TaskDetailPage({
               duration: paramsJson.duration,
               count: paramsJson.count,
               platform: paramsJson.platform,
+              outputLanguage: paramsJson.outputLanguage,
               model: paramsJson.model,
             },
           }
@@ -111,6 +127,7 @@ export default async function TaskDetailPage({
                 duration: paramsJson.duration,
                 count: paramsJson.count,
                 platform: paramsJson.platform,
+                outputLanguage: paramsJson.outputLanguage,
                 model: paramsJson.model,
               },
             }
@@ -124,6 +141,7 @@ export default async function TaskDetailPage({
                 duration: paramsJson.duration,
                 count: paramsJson.count,
                 platform: paramsJson.platform,
+                outputLanguage: paramsJson.outputLanguage,
                 model: paramsJson.model,
               },
             },
@@ -136,6 +154,15 @@ export default async function TaskDetailPage({
   ]
     .filter(Boolean)
     .join("\n");
+  const resultUrls = (task.resultUrls ?? []) as string[];
+  const copyBundleText = script
+    ? [
+        `标题：${script.copy.title}`,
+        `正文：${script.copy.caption}`,
+        `首评：${script.copy.first_comment}`,
+        `标签：${hashtagText || "无"}`,
+      ].join("\n\n")
+    : "";
 
   return (
     <div className="mx-auto max-w-5xl space-y-5">
@@ -161,6 +188,12 @@ export default async function TaskDetailPage({
             预计执行于 {formatShanghaiTime(task.scheduledAt)}（北京时间）
           </p>
         )}
+        <Link
+          href="/tasks"
+          className="inline-flex items-center gap-1 rounded-full border border-[var(--vc-border)] px-3 py-1 text-xs text-[var(--vc-text-secondary)]"
+        >
+          ← 返回列表
+        </Link>
         {task.taskGroupId && (
           <Link
             href={`/tasks/groups/${task.taskGroupId}`}
@@ -175,6 +208,10 @@ export default async function TaskDetailPage({
         >
           按此配置重来
         </Link>
+        <TaskZipDownloadButton taskId={task.id} disabled={resultUrls.length === 0} />
+        {task.status === "done" && resultUrls.length > 0 && (
+          <ShareToGalleryButton taskId={task.id} />
+        )}
       </div>
 
       <Section title="原始输入">
@@ -189,7 +226,16 @@ export default async function TaskDetailPage({
           <div>比例：{paramsJson.orientation === "landscape" ? "16:9" : "9:16"}</div>
           <div>时长：{paramsJson.duration ?? "—"} 秒</div>
           <div>平台：{paramsJson.platform ?? "—"}</div>
-          <div>数量：{paramsJson.count ?? "—"}</div>
+          <div>语言：{paramsJson.outputLanguage ?? "auto"}</div>
+          {isBatchTask ? (
+            <>
+              <div>商品数：{batchProductCount}</div>
+              <div>每商品条数：{batchUnitsPerProduct}</div>
+              <div>总目标：{batchTargetCount}</div>
+            </>
+          ) : (
+            <div>数量：{paramsJson.count ?? "—"}</div>
+          )}
         </div>
       </Section>
 
@@ -257,6 +303,9 @@ export default async function TaskDetailPage({
           </Section>
 
           <Section title="文案与标签">
+            <div className="flex justify-end">
+              <CopyTextButton text={copyBundleText} />
+            </div>
             <div className="grid gap-3 md:grid-cols-3">
               <div className="rounded-2xl border border-[var(--vc-border)] p-4">
                 <div className="mb-2 flex items-center justify-between gap-2">

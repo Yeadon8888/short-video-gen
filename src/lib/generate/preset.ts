@@ -10,6 +10,7 @@ export interface GenerateReplayPreset {
   uploadName?: string;
   uploadBrief?: string;
   batchTheme?: string;
+  batchUnitsPerProduct?: number;
   selectedImageIds?: string[];
   batchImageIds?: string[];
   params?: Partial<GenerateParams>;
@@ -44,6 +45,9 @@ export function buildGenerateReplayHref(preset: GenerateReplayPreset): string {
   if (preset.uploadName) searchParams.set("uploadName", preset.uploadName);
   if (preset.uploadBrief) searchParams.set("uploadBrief", preset.uploadBrief);
   if (preset.batchTheme) searchParams.set("batchTheme", preset.batchTheme);
+  if (typeof preset.batchUnitsPerProduct === "number") {
+    searchParams.set("batchUnitsPerProduct", String(preset.batchUnitsPerProduct));
+  }
 
   const selectedImageIds = withCsv(preset.selectedImageIds);
   if (selectedImageIds) searchParams.set("selectedImageIds", selectedImageIds);
@@ -59,6 +63,9 @@ export function buildGenerateReplayHref(preset: GenerateReplayPreset): string {
     searchParams.set("count", String(preset.params.count));
   }
   if (preset.params?.platform) searchParams.set("platform", preset.params.platform);
+  if (preset.params?.outputLanguage) {
+    searchParams.set("outputLanguage", preset.params.outputLanguage);
+  }
   if (preset.params?.model) searchParams.set("model", preset.params.model);
 
   const query = searchParams.toString();
@@ -68,6 +75,7 @@ export function buildGenerateReplayHref(preset: GenerateReplayPreset): string {
 export function parseGenerateReplayPreset(searchParams: SearchParamsLike): GenerateReplayPreset {
   const duration = Number(searchParams.get("duration"));
   const count = Number(searchParams.get("count"));
+  const batchUnitsPerProduct = Number(searchParams.get("batchUnitsPerProduct"));
 
   return {
     tab: (searchParams.get("tab") as GenerateReplayPreset["tab"]) ?? undefined,
@@ -79,15 +87,34 @@ export function parseGenerateReplayPreset(searchParams: SearchParamsLike): Gener
     uploadName: searchParams.get("uploadName") ?? undefined,
     uploadBrief: searchParams.get("uploadBrief") ?? undefined,
     batchTheme: searchParams.get("batchTheme") ?? undefined,
+    batchUnitsPerProduct:
+      Number.isFinite(batchUnitsPerProduct) && batchUnitsPerProduct > 0
+        ? batchUnitsPerProduct
+        : undefined,
     selectedImageIds: readCsv(searchParams.get("selectedImageIds")),
     batchImageIds: readCsv(searchParams.get("batchImageIds")),
     params: {
       orientation:
         searchParams.get("orientation") === "landscape" ? "landscape" : "portrait",
-      duration: duration === 8 || duration === 10 || duration === 15 ? duration : undefined,
+      duration:
+        duration === 6 || duration === 8 || duration === 10 || duration === 15
+          ? duration
+          : undefined,
       count: Number.isFinite(count) && count > 0 ? count : undefined,
       platform:
         searchParams.get("platform") === "tiktok" ? "tiktok" : searchParams.get("platform") === "douyin" ? "douyin" : undefined,
+      outputLanguage:
+        searchParams.get("outputLanguage") === "en" ||
+        searchParams.get("outputLanguage") === "es-mx" ||
+        searchParams.get("outputLanguage") === "es" ||
+        searchParams.get("outputLanguage") === "ms" ||
+        searchParams.get("outputLanguage") === "en-my" ||
+        searchParams.get("outputLanguage") === "pt-br" ||
+        searchParams.get("outputLanguage") === "id" ||
+        searchParams.get("outputLanguage") === "ar" ||
+        searchParams.get("outputLanguage") === "auto"
+          ? (searchParams.get("outputLanguage") as GenerateParams["outputLanguage"])
+          : undefined,
       model: searchParams.get("model") ?? undefined,
     },
   };

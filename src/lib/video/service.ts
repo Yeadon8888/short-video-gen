@@ -2,19 +2,23 @@ import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { models } from "@/lib/db/schema";
 import type { Model } from "@/lib/db/schema";
-import type { TaskStatusResult, VideoParams } from "./types";
+import { MODEL_CAPABILITIES } from "@/lib/models/capabilities";
+import type { TaskStatusResult, VideoDuration, VideoParams } from "./types";
 import { platoProvider } from "./providers/plato";
+import { yunwuProvider } from "./providers/yunwu";
+import { dashscopeProvider } from "./providers/dashscope";
+import { prepareImagesForProvider } from "./image-prep";
 
 export interface VideoProviderCapabilities {
-  allowedDurations: Array<8 | 10 | 15>;
-  defaultDuration: 8 | 10 | 15;
+  allowedDurations: VideoDuration[];
+  defaultDuration: VideoDuration;
 }
 
 export interface VideoModelDefaultParams {
   orientation?: "portrait" | "landscape";
-  duration?: 8 | 10 | 15;
+  duration?: VideoDuration;
   count?: number;
-  allowedDurations?: Array<8 | 10 | 15>;
+  allowedDurations?: VideoDuration[];
   [key: string]: unknown;
 }
 
@@ -23,6 +27,7 @@ export interface VideoModelRecord {
   name: Model["name"];
   slug: Model["slug"];
   provider: Model["provider"];
+  capability: Model["capability"];
   creditsPerGen: Model["creditsPerGen"];
   isActive: Model["isActive"];
   apiKey: Model["apiKey"];
@@ -48,7 +53,7 @@ export interface VideoParamInput {
   prompt: string;
   imageUrls?: string[];
   orientation?: "portrait" | "landscape";
-  duration?: 8 | 10 | 15;
+  duration?: VideoDuration;
   count?: number;
   model: string;
 }
@@ -59,16 +64,18 @@ export interface VideoModelOption {
   provider: string;
   creditsPerGen: number;
   defaultParams: VideoModelDefaultParams;
-  allowedDurations: Array<8 | 10 | 15>;
-  defaultDuration: 8 | 10 | 15;
+  allowedDurations: VideoDuration[];
+  defaultDuration: VideoDuration;
 }
 
 const PROVIDERS: Record<string, VideoProviderAdapter> = {
   plato: platoProvider,
+  yunwu: yunwuProvider,
+  dashscope: dashscopeProvider,
 };
 
-function isDuration(value: unknown): value is 8 | 10 | 15 {
-  return value === 8 || value === 10 || value === 15;
+function isDuration(value: unknown): value is VideoDuration {
+  return value === 4 || value === 5 || value === 6 || value === 8 || value === 10 || value === 15;
 }
 
 function isOrientation(value: unknown): value is "portrait" | "landscape" {
@@ -143,6 +150,7 @@ export function getProviderCapabilities(model: {
     name: model.slug ?? "virtual-model",
     slug: model.slug ?? "virtual-model",
     provider: model.provider,
+    capability: MODEL_CAPABILITIES.videoGeneration,
     creditsPerGen: 0,
     isActive: true,
     apiKey: null,
@@ -211,7 +219,12 @@ export async function listActiveVideoModels(): Promise<VideoModelOption[]> {
   const rows = await db
     .select()
     .from(models)
-    .where(eq(models.isActive, true))
+    .where(
+      and(
+        eq(models.isActive, true),
+        eq(models.capability, MODEL_CAPABILITIES.videoGeneration),
+      ),
+    )
     .orderBy(asc(models.sortOrder));
 
   return rows.map((row) => {
@@ -249,7 +262,13 @@ export async function getActiveVideoModelBySlug(
   const [row] = await db
     .select()
     .from(models)
-    .where(and(eq(models.slug, slug), eq(models.isActive, true)))
+    .where(
+      and(
+        eq(models.slug, slug),
+        eq(models.isActive, true),
+        eq(models.capability, MODEL_CAPABILITIES.videoGeneration),
+      ),
+    )
     .limit(1);
 
   return row ? mapModelRow(row) : null;
@@ -267,7 +286,12 @@ export async function resolveActiveVideoModel(
   const [row] = await db
     .select()
     .from(models)
-    .where(eq(models.isActive, true))
+    .where(
+      and(
+        eq(models.isActive, true),
+        eq(models.capability, MODEL_CAPABILITIES.videoGeneration),
+      ),
+    )
     .orderBy(asc(models.sortOrder))
     .limit(1);
 
@@ -281,6 +305,7 @@ export async function resolveActiveVideoModel(
 export async function createVideoTasks(params: {
   model: VideoModelRecord;
   request: VideoParamInput;
+  userId?: string;
 }): Promise<{
   providerTaskIds: string[];
   resolvedParams: VideoParams;
@@ -290,6 +315,25 @@ export async function createVideoTasks(params: {
     params.model,
     params.request,
   );
+
+  // Resize reference images to match target video dimensions.
+  // Some upstream models reject images whose pixel size differs
+  // from the requested output resolution.
+  if (params.userId && resolvedParams.imageUrls && resolvedParams.imageUrls.length > 0) {
+    const resolution =
+      (resolvedParams.providerOptions?.resolution as string) ??
+      (resolvedParams.providerOptions?.size as string) ??
+      "720P";
+    resolvedParams.imageUrls = await prepareImagesForProvider({
+      imageUrls: resolvedParams.imageUrls,
+      orientation: resolvedParams.orientation,
+      modelSlug: params.model.slug,
+      provider: params.model.provider,
+      resolution,
+      userId: params.userId,
+    });
+  }
+
   const providerTaskIds = await adapter.createTasks({
     model: params.model,
     params: resolvedParams,
@@ -300,6 +344,7 @@ export async function createVideoTasks(params: {
 export async function createVideoTasksForModelId(params: {
   modelId: string | null | undefined;
   request: VideoParamInput;
+  userId?: string;
 }): Promise<{
   model: VideoModelRecord;
   providerTaskIds: string[];
@@ -313,6 +358,7 @@ export async function createVideoTasksForModelId(params: {
   const result = await createVideoTasks({
     model,
     request: params.request,
+    userId: params.userId,
   });
   return { model, ...result };
 }

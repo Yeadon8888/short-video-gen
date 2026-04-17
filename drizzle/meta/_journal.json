@@ -29,6 +29,62 @@
       "when": 1774700000000,
       "tag": "0003_steady_task_groups",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1774701800000,
+      "tag": "0004_fulfillment_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1774703600000,
+      "tag": "0005_model_capability",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1774837200000,
+      "tag": "0006_asset_transform_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1774862400000,
+      "tag": "0007_script_generation_capability",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1774948800000,
+      "tag": "0008_task_result_asset_keys",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1775030400000,
+      "tag": "0009_alipay_payment_orders",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1775944800000,
+      "tag": "0010_gallery_items",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1776019200000,
+      "tag": "0011_task_type_scene_analyze",
+      "breakpoints": true
     }
   ]
 }

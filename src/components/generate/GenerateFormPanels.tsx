@@ -16,6 +16,7 @@ interface GenerateFormPanelsProps {
   urlBrief: string;
   uploadBrief: string;
   batchTheme: string;
+  batchUnitsPerProduct: number;
   selectedImageIds: string[];
   batchImageIds: string[];
   onThemeInputChange: (value: string) => void;
@@ -24,6 +25,7 @@ interface GenerateFormPanelsProps {
   onUrlBriefChange: (value: string) => void;
   onUploadBriefChange: (value: string) => void;
   onBatchThemeChange: (value: string) => void;
+  onBatchUnitsPerProductChange: (value: number) => void;
   onSelectedImageIdsChange: (ids: string[]) => void;
   onBatchImageIdsChange: (ids: string[]) => void;
   onVideoFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
@@ -41,6 +43,7 @@ export function GenerateFormPanels({
   urlBrief,
   uploadBrief,
   batchTheme,
+  batchUnitsPerProduct,
   selectedImageIds,
   batchImageIds,
   onThemeInputChange,
@@ -49,6 +52,7 @@ export function GenerateFormPanels({
   onUrlBriefChange,
   onUploadBriefChange,
   onBatchThemeChange,
+  onBatchUnitsPerProductChange,
   onSelectedImageIdsChange,
   onBatchImageIdsChange,
   onVideoFileChange,
@@ -61,7 +65,7 @@ export function GenerateFormPanels({
           value={themeInput}
           onChange={(event) => onThemeInputChange(event.target.value)}
           rows={4}
-          placeholder="比如：把这款护肤产品拍成马来西亚都市感的生活方式短视频"
+          placeholder="比如：把这款护肤产品拍成适合 TikTok 的生活方式短视频"
           className="w-full rounded-2xl border border-[var(--vc-border)] bg-[var(--vc-bg-root)] px-4 py-3 text-base text-white outline-none"
         />
         <textarea
@@ -88,7 +92,7 @@ export function GenerateFormPanels({
           value={urlInput}
           onChange={(event) => onUrlInputChange(event.target.value)}
           rows={3}
-          placeholder="粘贴抖音 / TikTok 链接"
+          placeholder="粘贴 TikTok / 抖音链接"
           className="w-full rounded-2xl border border-[var(--vc-border)] bg-[var(--vc-bg-root)] px-4 py-3 text-base text-white outline-none"
         />
         <textarea
@@ -169,14 +173,35 @@ export function GenerateFormPanels({
         value={batchTheme}
         onChange={(event) => onBatchThemeChange(event.target.value)}
         rows={4}
-        placeholder="比如：把这个产品做成马来西亚风格的带货短视频，前三秒强钩子，突出生活场景和购买欲"
+        placeholder="比如：把这个产品做成适合 TikTok 的带货短视频，前三秒强钩子，突出生活场景和购买欲"
         className="w-full rounded-2xl border border-[var(--vc-border)] bg-[var(--vc-bg-root)] px-4 py-3 text-base text-white outline-none"
       />
+      <div className="rounded-2xl border border-[var(--vc-border)] bg-[var(--vc-bg-root)] px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-white">每个商品生成条数</p>
+            <p className="mt-1 text-xs text-[var(--vc-text-muted)]">
+              批量带货模式只看这里的数量设置。勾选几个商品，就会按每个商品 {batchUnitsPerProduct} 条去生成。
+            </p>
+          </div>
+          <select
+            value={batchUnitsPerProduct}
+            onChange={(event) => onBatchUnitsPerProductChange(Number(event.target.value))}
+            className="rounded-full border border-[var(--vc-border)] bg-[var(--vc-bg-surface)] px-3 py-2 text-sm text-white outline-none"
+          >
+            {[1, 2, 3, 4, 5].map((value) => (
+              <option key={value} value={value}>
+                {value} 条/商品
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
       <ProductImagePicker
         selectedIds={batchImageIds}
         onChange={onBatchImageIdsChange}
         title="批量产品图片"
-        description="批量带货模式会按你勾选的顺序循环复用产品图，直到凑满生成数量。"
+        description="勾选几个商品，就会创建几个商品任务。总视频数 = 商品数 × 每商品条数。系统会按勾选顺序逐个商品生成，并按每个商品的目标条数自动补齐。"
       />
     </div>
   );

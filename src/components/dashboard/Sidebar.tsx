@@ -7,9 +7,12 @@ import {
   Clapperboard,
   History,
   ImageIcon,
+  Images,
+  UserCircle,
   Settings,
   Shield,
   Coins,
+  ScanSearch,
   X,
 } from "lucide-react";
 import type { User } from "@/lib/db/schema";
@@ -22,6 +25,9 @@ interface SidebarProps {
 
 const userLinks = [
   { href: "/generate", label: "生成视频", icon: Clapperboard },
+  { href: "/analyze", label: "视频拆解", icon: ScanSearch },
+  { href: "/scene", label: "商品组图", icon: Images },
+  // { href: "/face-swap", label: "视频换人", icon: UserCircle }, // 暂未开放
   { href: "/tasks", label: "任务历史", icon: History },
   { href: "/assets", label: "产品图片", icon: ImageIcon },
   { href: "/pricing", label: "积分充值", icon: Coins },
