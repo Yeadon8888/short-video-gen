@@ -237,16 +237,24 @@ export default async function LandingPage() {
       </main>
 
       {/* ═══════════════════ Footer ═══════════════════ */}
-      <footer className="border-t border-[var(--vc-border)] px-6 py-8 lg:px-12">
-        <div className="mx-auto flex max-w-[1280px] flex-col items-center justify-between gap-4 sm:flex-row">
-          <div className="flex items-center gap-3 opacity-50 transition-opacity hover:opacity-100">
+      <footer className="border-t border-[var(--vc-border)] px-6 py-10 lg:px-12">
+        <div className="mx-auto flex max-w-[1280px] flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3 opacity-60 transition-opacity hover:opacity-100">
             <div className="flex h-8 w-8 items-center justify-center rounded bg-[var(--vc-accent)]">
               <Film className="h-4 w-4 text-[var(--vc-bg-root)]" aria-hidden="true" />
             </div>
             <span className="font-heading text-sm font-bold">VidClaw</span>
           </div>
+          <nav className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-slate-500">
+            <Link href="/blog" className="transition-colors hover:text-white">博客</Link>
+            <Link href="/gallery" className="transition-colors hover:text-white">灵感广场</Link>
+            <Link href="/privacy" className="transition-colors hover:text-white">隐私政策</Link>
+            <Link href="/terms" className="transition-colors hover:text-white">服务条款</Link>
+            <Link href="/refund" className="transition-colors hover:text-white">退款政策</Link>
+            <Link href="/contact" className="transition-colors hover:text-white">联系我们</Link>
+          </nav>
           <p className="text-xs text-slate-600">
-            © {new Date().getFullYear()} VidClaw · AI 短视频生成平台
+            © {new Date().getFullYear()} VidClaw
           </p>
         </div>
       </footer>
