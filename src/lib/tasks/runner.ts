@@ -44,18 +44,30 @@ export async function runTaskMaintenance(options?: {
     .orderBy(desc(taskGroups.createdAt))
     .limit(options?.taskGroupLimit ?? 30);
 
-  let processedGroups = 0;
-  for (const group of activeTaskGroups) {
-    if (group.status !== "pending" && group.status !== "generating") continue;
-    await processPendingBatchTasks({
-      taskGroupId: group.id,
-      limit: Math.min(
-        options?.groupProcessLimit ?? getMaxBatchGroupSubmissionsPerTick(),
-        getMaxBatchGroupSubmissionsPerTick(),
-      ),
-    });
-    processedGroups++;
+  // Run each task_group's batch processor concurrently so that multiple
+  // users submitting at the same time don't serialize behind each other.
+  // Within a single group `processPendingBatchTasks` still throttles via
+  // batch-queue (stagger + per-slot cap), which is the right place for
+  // provider-side rate limiting. allSettled so one user's crash doesn't
+  // poison the whole tick.
+  const groupLimit = Math.min(
+    options?.groupProcessLimit ?? getMaxBatchGroupSubmissionsPerTick(),
+    getMaxBatchGroupSubmissionsPerTick(),
+  );
+  const eligibleGroups = activeTaskGroups.filter(
+    (group) => group.status === "pending" || group.status === "generating",
+  );
+  const groupResults = await Promise.allSettled(
+    eligibleGroups.map((group) =>
+      processPendingBatchTasks({ taskGroupId: group.id, limit: groupLimit }),
+    ),
+  );
+  for (const result of groupResults) {
+    if (result.status === "rejected") {
+      console.error("[tasks/runner] processPendingBatchTasks failed:", result.reason);
+    }
   }
+  const processedGroups = groupResults.filter((r) => r.status === "fulfilled").length;
 
   const taskConditions = options?.userId
     ? [eq(tasks.userId, options.userId)]
@@ -143,9 +155,20 @@ export async function runTaskMaintenance(options?: {
       (item) => item.providerTaskId && item.status !== "SUCCESS" && item.status !== "FAILED",
     );
     if (items.length === 0) {
-      // Grace period: don't fail tasks created within the last 2 minutes.
-      // This prevents a race condition where the runner fires before
-      // task_items are fully inserted after provider submission.
+      // Batch sub-tasks (those belonging to a task_group) have their own
+      // lifecycle managed by processPendingBatchTasks: it throttles
+      // submissions (2 per cron tick) and resets stale `analyzing` rows.
+      // If the runner's orphan scanner touches these, it races with batch
+      // throttling and kills tasks that are legitimately still queued or
+      // mid-Gemini. Trust batch-processing for the whole task_group lane.
+      if (task.taskGroupId) {
+        continue;
+      }
+
+      // Grace period for standalone tasks: don't fail anything created
+      // within the last 2 minutes. Covers the race where runner fires
+      // between `analyzing → generating` and the task_items insert that
+      // follows provider submit.
       const taskAge = Date.now() - new Date(task.createdAt).getTime();
       if (taskAge < 2 * 60 * 1000) {
         continue;

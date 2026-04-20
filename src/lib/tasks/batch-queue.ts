@@ -10,7 +10,12 @@
 // becomes the primary, move this knob onto the `models` row (per-model
 // throttle — listed in the architecture follow-ups).
 const MAX_BATCH_GROUP_SUBMISSIONS_PER_TICK = 3;
-const MAX_BATCH_SLOT_SUBMISSIONS_PER_TICK = 3;
+// Keep slot-per-tick at 2 because grok2api's POST /v1/videos is synchronous
+// (60-90s per video, observed). A tick that submits 3 groups × 3 slots ×
+// 90s = 810s would blow past Vercel's 300s maxDuration. 2 slots cap the
+// synchronous tail at ~180s and still clear steady-state demand within a
+// handful of ticks.
+const MAX_BATCH_SLOT_SUBMISSIONS_PER_TICK = 2;
 const BATCH_SUBMISSION_STAGGER_MS = 1_000;
 
 export function getMaxBatchGroupSubmissionsPerTick() {
