@@ -1,6 +1,17 @@
-const MAX_BATCH_GROUP_SUBMISSIONS_PER_TICK = 2;
-const MAX_BATCH_SLOT_SUBMISSIONS_PER_TICK = 2;
-const BATCH_SUBMISSION_STAGGER_MS = 2_000;
+// Provider throughput assumptions, 2026-04-20:
+//   grok2api — self-hosted Railway proxy w/ its own account pool; bottleneck
+//     is proxy CPU and upstream Grok 429, not our client-side cadence. Proxy
+//     observed handling 3-4 creates/min without visible degradation.
+//   plato/yunwu — third-party SaaS w/ hard per-account QPS limits; keep
+//     conservative.
+// Since all three share this global knob today, the numbers here are tuned
+// to grok2api (the model currently driving batch volume) while still
+// staying under plato/yunwu's documented ceilings. If a different model
+// becomes the primary, move this knob onto the `models` row (per-model
+// throttle — listed in the architecture follow-ups).
+const MAX_BATCH_GROUP_SUBMISSIONS_PER_TICK = 3;
+const MAX_BATCH_SLOT_SUBMISSIONS_PER_TICK = 3;
+const BATCH_SUBMISSION_STAGGER_MS = 1_000;
 
 export function getMaxBatchGroupSubmissionsPerTick() {
   return MAX_BATCH_GROUP_SUBMISSIONS_PER_TICK;
