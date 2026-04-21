@@ -81,6 +81,7 @@ export async function submitSlotAttempt(params: {
   if (!model) return null;
 
   let providerTaskIds: string[];
+  let immediateResults: (import("@/lib/video/types").TaskStatusResult | null)[] | undefined;
   try {
     const submitted = await createVideoTasks({
       model,
@@ -95,12 +96,15 @@ export async function submitSlotAttempt(params: {
       userId: task.userId,
     });
     providerTaskIds = submitted.providerTaskIds;
+    immediateResults = submitted.immediateResults;
   } catch {
     return null;
   }
 
   if (providerTaskIds.length === 0) return null;
   const providerTaskId = providerTaskIds[0];
+  const immediate = immediateResults?.[0] ?? null;
+  const isImmediateSuccess = immediate?.status === "SUCCESS" && Boolean(immediate.url);
 
   const newAttemptNo = slot.attemptCount + 1;
 
@@ -111,7 +115,10 @@ export async function submitSlotAttempt(params: {
       slotId: slot.id,
       attemptNo: newAttemptNo,
       providerTaskId,
-      status: "PENDING",
+      status: isImmediateSuccess ? "SUCCESS" : "PENDING",
+      progress: isImmediateSuccess ? "100%" : "0%",
+      resultUrl: isImmediateSuccess ? immediate!.url : null,
+      completedAt: isImmediateSuccess ? new Date() : null,
     })
     .returning({ id: taskItems.id });
 

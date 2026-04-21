@@ -1,7 +1,8 @@
 import { and, asc, eq, lte } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { taskItems, tasks } from "@/lib/db/schema";
+import { tasks } from "@/lib/db/schema";
 import { failTaskAndRefund } from "@/lib/tasks/reconciliation";
+import { insertTaskItemsFromSubmission } from "@/lib/tasks/items";
 import { createVideoTasksForModelId } from "@/lib/video/service";
 
 export const SCHEDULED_BATCH_LIMIT = 20;
@@ -58,13 +59,11 @@ export async function processDueScheduledTasks(options?: {
         },
       });
 
-      for (const providerTaskId of submitted.providerTaskIds) {
-        await db.insert(taskItems).values({
-          taskId: claimedTask.id,
-          providerTaskId,
-          status: "PENDING",
-        });
-      }
+      await insertTaskItemsFromSubmission({
+        taskId: claimedTask.id,
+        providerTaskIds: submitted.providerTaskIds,
+        immediateResults: submitted.immediateResults,
+      });
 
       processed++;
     } catch (e) {
