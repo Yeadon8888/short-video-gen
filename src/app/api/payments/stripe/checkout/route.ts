@@ -1,41 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { createCreditRechargeOrder, type PaymentProvider } from "@/lib/payments/orders";
+import { createCreditRechargeOrder } from "@/lib/payments/orders";
 
 export async function POST(req: NextRequest) {
   const auth = await requireAuth();
   if (auth instanceof NextResponse) return auth;
 
-  const body = (await req.json().catch(() => ({}))) as {
-    packageId?: string;
-    provider?: PaymentProvider;
-  };
+  const body = (await req.json().catch(() => ({}))) as { packageId?: string };
   if (!body.packageId) {
     return NextResponse.json({ error: "缺少套餐 ID" }, { status: 400 });
   }
 
-  const provider: PaymentProvider = body.provider === "alipay" ? "alipay" : "stripe";
-
   try {
-    const userAgent = req.headers.get("user-agent") ?? "";
-    const isMobile = /mobile|android|iphone|ipad/i.test(userAgent);
     const result = await createCreditRechargeOrder({
       userId: auth.user.id,
       packageId: body.packageId,
-      isMobile,
-      provider,
+      isMobile: false,
+      provider: "stripe",
       userEmail: auth.user.email ?? null,
     });
 
     return NextResponse.json({
       ok: true,
-      provider,
       orderId: result.order.id,
       outTradeNo: result.order.outTradeNo,
       paymentUrl: result.paymentUrl,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "创建支付订单失败";
+    const message = error instanceof Error ? error.message : "创建 Stripe 支付失败";
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }

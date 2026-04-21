@@ -1,69 +1,55 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState } from "react";
 import {
   Zap,
   Crown,
   Building2,
   Check,
-  Clock,
   X,
-  Sparkles,
   MessageCircle,
 } from "lucide-react";
 import Image from "next/image";
 
-// ─── Countdown target: 7 days from first deployment (fixed date) ───
-// You can update this date whenever you want to reset the countdown
-const PROMO_END = new Date("2026-03-23T23:59:59+08:00");
-
-function useCountdown(target: Date) {
-  const [now, setNow] = useState(() => new Date());
-
-  useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  return useMemo(() => {
-    const diff = Math.max(0, target.getTime() - now.getTime());
-    const days = Math.floor(diff / (86400 * 1000));
-    const hours = Math.floor((diff % (86400 * 1000)) / (3600 * 1000));
-    const minutes = Math.floor((diff % (3600 * 1000)) / (60 * 1000));
-    const seconds = Math.floor((diff % (60 * 1000)) / 1000);
-    return { days, hours, minutes, seconds, expired: diff === 0 };
-  }, [now, target]);
-}
-
 // ─── Plans ───
 
+// Mirror of payments/config.ts DEFAULT_PACKAGES — keep in sync.
+// Stripe charges USD (`amountUsdCents`); the CNY column is shown only for
+// reference so users without USD bank cards can roughly compare.
 const plans = [
   {
     id: "starter",
-    name: "体验包",
-    price: 9.9,
-    originalPrice: 19.9,
-    credits: 50,
+    name: "入门版",
+    priceUsd: 9.9,
+    priceCnyApprox: 70,
+    credits: 700,
+    expiresInDays: 180,
     icon: Zap,
     color: "from-blue-500 to-cyan-400",
     border: "border-blue-500/30",
-    features: ["50 积分", "约 5-10 条视频", "全模型可用", "7 天有效期"],
+    features: [
+      "700 积分",
+      "约 35 条 Hailuo Fast / 14 条 Sora 2",
+      "全模型可用",
+      "180 天有效期",
+    ],
   },
   {
     id: "pro",
-    name: "创作者套餐",
-    price: 50,
-    originalPrice: 99,
-    credits: 500,
+    name: "专业版",
+    priceUsd: 49,
+    priceCnyApprox: 349,
+    credits: 3500,
+    expiresInDays: 180,
     icon: Crown,
     color: "from-[var(--vc-accent)] to-purple-400",
     border: "border-[var(--vc-accent)]/40",
     popular: true,
     features: [
-      "500 积分",
-      "约 50-100 条视频",
+      "3500 积分",
+      "约 175 条 Hailuo Fast / 70 条 Sora 2",
       "全模型可用",
-      "30 天有效期",
+      "180 天有效期",
       "优先排队",
       "自定义 Prompt",
     ],
@@ -71,8 +57,10 @@ const plans = [
   {
     id: "enterprise",
     name: "企业部署",
-    price: null,
+    priceUsd: null,
+    priceCnyApprox: null,
     credits: null,
+    expiresInDays: null,
     icon: Building2,
     color: "from-amber-400 to-orange-500",
     border: "border-amber-500/30",
@@ -88,13 +76,37 @@ const plans = [
 ];
 
 export default function PricingPage() {
-  const countdown = useCountdown(PROMO_END);
   const [qrOpen, setQrOpen] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
+  const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
-  function handleSelect(planId: string) {
+  async function handleSelect(planId: string) {
     setSelectedPlan(planId);
-    setQrOpen(true);
+    setCheckoutError(null);
+
+    if (planId === "enterprise") {
+      setQrOpen(true);
+      return;
+    }
+
+    setCheckoutLoading(planId);
+    try {
+      const res = await fetch("/api/payments/stripe/checkout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ packageId: planId }),
+      });
+      const data = (await res.json()) as { paymentUrl?: string; error?: string };
+      if (!res.ok || !data.paymentUrl) {
+        throw new Error(data.error ?? "创建支付失败");
+      }
+      window.location.href = data.paymentUrl;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "创建支付失败,请稍后再试";
+      setCheckoutError(message);
+      setCheckoutLoading(null);
+    }
   }
 
   return (
@@ -108,40 +120,6 @@ export default function PricingPage() {
           选择适合你的套餐，开始 AI 视频创作
         </p>
       </div>
-
-      {/* ═══ Countdown Banner ═══ */}
-      {!countdown.expired && (
-        <div className="mx-auto max-w-lg">
-          <div className="relative overflow-hidden rounded-2xl border border-[var(--vc-accent)]/30 bg-gradient-to-r from-[var(--vc-accent)]/5 to-purple-500/5 px-6 py-4">
-            <div className="absolute -right-4 -top-4 h-24 w-24 rounded-full bg-[var(--vc-accent)]/10 blur-2xl" />
-            <div className="relative flex flex-col items-center gap-3 sm:flex-row sm:justify-between">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-5 w-5 text-[var(--vc-accent)]" />
-                <span className="text-sm font-bold text-white">限时优惠</span>
-              </div>
-              <div className="flex items-center gap-2">
-                {(
-                  [
-                    ["天", countdown.days],
-                    ["时", countdown.hours],
-                    ["分", countdown.minutes],
-                    ["秒", countdown.seconds],
-                  ] as const
-                ).map(([label, value]) => (
-                  <div key={label} className="flex items-center gap-1">
-                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--vc-bg-elevated)] font-mono text-lg font-bold tabular-nums text-white">
-                      {String(value).padStart(2, "0")}
-                    </span>
-                    <span className="text-xs text-[var(--vc-text-muted)]">
-                      {label}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ═══ Pricing Cards ═══ */}
       <div className="grid gap-6 md:grid-cols-3">
@@ -183,26 +161,31 @@ export default function PricingPage() {
 
               {/* Price */}
               <div className="mb-6">
-                {plan.price !== null ? (
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-4xl font-black text-white">
-                      ¥{plan.price}
-                    </span>
-                    {plan.originalPrice && (
-                      <span className="text-lg text-[var(--vc-text-dim)] line-through">
-                        ¥{plan.originalPrice}
+                {plan.priceUsd !== null ? (
+                  <>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-4xl font-black text-white">
+                        ${plan.priceUsd}
                       </span>
+                      <span className="text-sm text-[var(--vc-text-muted)]">
+                        USD
+                      </span>
+                    </div>
+                    {plan.priceCnyApprox && (
+                      <p className="mt-1 text-xs text-[var(--vc-text-dim)]">
+                        ≈ ¥{plan.priceCnyApprox} 人民币（仅供参考，实际按 USD 收费）
+                      </p>
                     )}
-                  </div>
+                    {plan.credits && (
+                      <p className="mt-1 text-sm text-[var(--vc-text-muted)]">
+                        ≈ ${(plan.priceUsd / plan.credits * 10).toFixed(2)}/条视频
+                      </p>
+                    )}
+                  </>
                 ) : (
                   <div className="text-2xl font-bold text-amber-400">
                     定制方案
                   </div>
-                )}
-                {plan.price !== null && plan.credits && (
-                  <p className="mt-1 text-sm text-[var(--vc-text-muted)]">
-                    ≈ ¥{(plan.price / plan.credits * 10).toFixed(1)}/条视频
-                  </p>
                 )}
               </div>
 
@@ -219,7 +202,8 @@ export default function PricingPage() {
               {/* CTA */}
               <button
                 onClick={() => handleSelect(plan.id)}
-                className={`w-full rounded-xl py-3 text-sm font-bold transition-all duration-200 ${
+                disabled={checkoutLoading === plan.id}
+                className={`w-full rounded-xl py-3 text-sm font-bold transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-60 ${
                   plan.popular
                     ? "bg-gradient-to-r from-[var(--vc-accent)] to-purple-500 text-white shadow-lg shadow-[var(--vc-accent)]/25 hover:shadow-[var(--vc-accent)]/40"
                     : isEnterprise
@@ -227,7 +211,11 @@ export default function PricingPage() {
                       : "border border-[var(--vc-border)] bg-[var(--vc-bg-elevated)] text-white hover:bg-white/[0.08]"
                 }`}
               >
-                {isEnterprise ? "联系我们" : "立即充值"}
+                {checkoutLoading === plan.id
+                  ? "正在跳转 Stripe..."
+                  : isEnterprise
+                    ? "联系我们"
+                    : "立即充值"}
               </button>
             </div>
           );
@@ -236,12 +224,17 @@ export default function PricingPage() {
 
       {/* ═══ Notice ═══ */}
       <div className="mx-auto max-w-lg space-y-3">
+        {checkoutError && (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            {checkoutError}
+          </div>
+        )}
         <div className="flex items-center gap-2 rounded-xl border border-blue-500/20 bg-blue-500/5 px-4 py-3">
           <MessageCircle className="h-5 w-5 shrink-0 text-blue-400" />
           <div className="text-sm text-blue-300/90">
             <p className="font-medium">充值流程</p>
             <p className="mt-0.5 text-blue-300/70">
-              扫码添加好友 → 备注「体验包」或「创作者套餐」 → 转账对应金额 → 5 分钟内人工充值到账。支付接口正在开发中，当前采用人工确认方式。
+              点击「立即充值」跳转 Stripe 完成付款，支付成功后积分自动到账。如需企业部署或定制方案，请使用「联系我们」扫码沟通。
             </p>
           </div>
         </div>
@@ -275,15 +268,9 @@ export default function PricingPage() {
 
             <div className="space-y-5 text-center">
               <div>
-                <h3 className="text-xl font-bold text-white">
-                  {selectedPlan === "enterprise"
-                    ? "企业咨询"
-                    : "微信扫码付款"}
-                </h3>
+                <h3 className="text-xl font-bold text-white">企业咨询</h3>
                 <p className="mt-1 text-sm text-[var(--vc-text-muted)]">
-                  {selectedPlan === "enterprise"
-                    ? "扫码添加微信，详细沟通企业部署方案"
-                    : `扫码添加好友，备注「${plans.find((p) => p.id === selectedPlan)?.name ?? ""}」，转账 ¥${plans.find((p) => p.id === selectedPlan)?.price ?? ""}`}
+                  扫码添加微信，详细沟通企业部署方案
                 </p>
               </div>
 
@@ -299,17 +286,9 @@ export default function PricingPage() {
                 </div>
               </div>
 
-              <div className="space-y-2 text-sm text-[var(--vc-text-secondary)]">
-                <div className="flex items-center justify-center gap-2">
-                  <Clock className="h-4 w-4 text-[var(--vc-accent)]" />
-                  <span>添加好友后 5 分钟内人工充值到账</span>
-                </div>
-                <p className="text-xs text-[var(--vc-text-dim)]">
-                  {selectedPlan === "enterprise"
-                    ? "添加好友后备注「企业咨询」，我们会尽快联系您"
-                    : "请备注套餐名称 + 注册邮箱，转账后即可充值"}
-                </p>
-              </div>
+              <p className="text-xs text-[var(--vc-text-dim)]">
+                添加好友后备注「企业咨询」，我们会尽快联系您
+              </p>
             </div>
           </div>
         </div>

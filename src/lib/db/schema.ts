@@ -37,7 +37,7 @@ export const paymentOrderStatusEnum = pgEnum("payment_order_status", [
   "failed",
   "closed",
 ]);
-export const paymentProviderEnum = pgEnum("payment_provider", ["alipay"]);
+export const paymentProviderEnum = pgEnum("payment_provider", ["alipay", "stripe"]);
 export const assetTypeEnum = pgEnum("asset_type", ["image", "video"]);
 export const fulfillmentModeEnum = pgEnum("fulfillment_mode", [
   "standard",
@@ -79,6 +79,8 @@ export const users = pgTable("users", {
   role: userRoleEnum("role").default("user").notNull(),
   status: userStatusEnum("status").default("active").notNull(),
   credits: integer("credits").default(0).notNull(),
+  /** Stripe Customer ID (cus_...), set lazily on first checkout */
+  stripeCustomerId: varchar("stripe_customer_id", { length: 64 }).unique(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -123,7 +125,7 @@ export const taskGroups = pgTable("task_groups", {
     duration: 4 | 5 | 6 | 8 | 10 | 15;
     count: number;
     platform: "douyin" | "tiktok";
-    outputLanguage?: "auto" | "en" | "es-mx" | "es" | "ms" | "en-my" | "pt-br" | "id" | "ar";
+    outputLanguage?: string; // See src/lib/video/languages.ts — widened so new langs don't require a migration.
     model: string;
     batchUnitsPerProduct?: number;
     batchProductCount?: number;
@@ -160,7 +162,7 @@ export const tasks = pgTable("tasks", {
     duration: 4 | 5 | 6 | 8 | 10 | 15;
     count: number;
     platform: "douyin" | "tiktok";
-    outputLanguage?: "auto" | "en" | "es-mx" | "es" | "ms" | "en-my" | "pt-br" | "id" | "ar";
+    outputLanguage?: string; // See src/lib/video/languages.ts — widened so new langs don't require a migration.
     model: string;
     imageUrls?: string[];
     sourceMode?: "theme" | "url" | "upload" | "batch";
@@ -260,7 +262,7 @@ export const creditTxns = pgTable("credit_txns", {
 export const paymentOrders = pgTable("payment_orders", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
-  provider: paymentProviderEnum("provider").default("alipay").notNull(),
+  provider: paymentProviderEnum("provider").default("stripe").notNull(),
   status: paymentOrderStatusEnum("status").default("pending").notNull(),
   outTradeNo: varchar("out_trade_no", { length: 64 }).unique().notNull(),
   providerTradeNo: varchar("provider_trade_no", { length: 64 }),
@@ -270,10 +272,28 @@ export const paymentOrders = pgTable("payment_orders", {
   credits: integer("credits").notNull(),
   paymentUrl: text("payment_url"),
   rawNotify: jsonb("raw_notify"),
+  /** Stripe Checkout Session ID (cs_...) */
+  stripeSessionId: varchar("stripe_session_id", { length: 128 }),
+  /** Stripe PaymentIntent ID (pi_...), populated after payment */
+  stripePaymentIntentId: varchar("stripe_payment_intent_id", { length: 128 }),
   paidAt: timestamp("paid_at", { withTimezone: true }),
   expiredAt: timestamp("expired_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/**
+ * Idempotency log for Stripe webhooks. Each webhook event is recorded by
+ * its Stripe event id; if we see the same id again (Stripe retries on
+ * non-2xx), we short-circuit instead of re-granting credits.
+ */
+export const stripeEvents = pgTable("stripe_events", {
+  /** Stripe event id, e.g. evt_1NxyZ... */
+  id: varchar("id", { length: 64 }).primaryKey(),
+  type: varchar("type", { length: 64 }).notNull(),
+  receivedAt: timestamp("received_at", { withTimezone: true }).defaultNow().notNull(),
+  processedAt: timestamp("processed_at", { withTimezone: true }),
+  payload: jsonb("payload"),
 });
 
 // ─── User Assets (用户上传的参考图/视频) ───
@@ -362,6 +382,9 @@ export type NewTaskSlot = typeof taskSlots.$inferInsert;
 export type TaskItem = typeof taskItems.$inferSelect;
 export type CreditTxn = typeof creditTxns.$inferSelect;
 export type PaymentOrder = typeof paymentOrders.$inferSelect;
+export type NewPaymentOrder = typeof paymentOrders.$inferInsert;
+export type StripeEvent = typeof stripeEvents.$inferSelect;
+export type NewStripeEvent = typeof stripeEvents.$inferInsert;
 export type UserAsset = typeof userAssets.$inferSelect;
 export type AssetTransformJob = typeof assetTransformJobs.$inferSelect;
 export type GalleryItem = typeof galleryItems.$inferSelect;
