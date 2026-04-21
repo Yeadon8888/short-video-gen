@@ -32,6 +32,7 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const justRegistered = searchParams.get("registered") === "1";
   const googleError = searchParams.get("error") === "google_auth_failed";
+  const sessionExpired = searchParams.get("session_expired") === "1";
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -60,6 +61,11 @@ function LoginForm() {
         {justRegistered && (
           <div className="rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-2 text-sm text-green-400">
             注册成功！请查收验证邮件后登录
+          </div>
+        )}
+        {sessionExpired && !justRegistered && (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-400">
+            登录状态已过期，请重新登录。
           </div>
         )}
         <div>
