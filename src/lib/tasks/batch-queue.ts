@@ -30,9 +30,24 @@ export function getBatchSubmissionStaggerMs() {
   return BATCH_SUBMISSION_STAGGER_MS;
 }
 
+/**
+ * 按 `index * BATCH_SUBMISSION_STAGGER_MS` 错开子任务起跑时间。
+ *
+ * 这个函数在 batch-processing.ts 的 Promise.allSettled 并行 map 里被调用，
+ * 每个 sub-task 按自己的 index 等待不同时长后才真正开始。第 0 个立即开始，
+ * 第 1 个等 1s，第 2 个等 2s，以此类推。这样 N 个并发 task 不会在同一个
+ * 毫秒内同时往 provider 创建 N 条请求，从 provider 视角看仍然是有节奏的
+ * 提交流。
+ *
+ * 旧实现是"不管 index 多少都等固定 BATCH_SUBMISSION_STAGGER_MS"，在并行
+ * 调用下所有 sub-task 会同一时刻一起跳过 sleep 一起开始，等于没做错峰。
+ * 名字和注释也因此骗过 audit 评审。
+ */
 export async function delayStaggeredSubmission(index: number) {
   if (index <= 0) return;
-  await new Promise((resolve) => setTimeout(resolve, BATCH_SUBMISSION_STAGGER_MS));
+  await new Promise((resolve) =>
+    setTimeout(resolve, index * BATCH_SUBMISSION_STAGGER_MS),
+  );
 }
 
 export async function delayBatchSubmission(index: number) {
