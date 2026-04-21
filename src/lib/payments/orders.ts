@@ -303,9 +303,31 @@ export async function markPaymentOrderPaidFromNotify(params: {
 
 const HANDLED_STRIPE_EVENTS = new Set<string>([
   "checkout.session.completed",
+  // ACH / SEPA / Oxxo 等延迟支付在 Checkout 结束时 payment_status='unpaid'，
+  // 真实付款成功由这个后续事件通知。如果不处理，这笔钱会永远留在 pending
+  // 订单上，用户付了但积分不入账。
+  "checkout.session.async_payment_succeeded",
   "checkout.session.async_payment_failed",
   "checkout.session.expired",
 ]);
+
+/**
+ * Stripe Checkout 的"支付成功"语义有两种：
+ *   - `checkout.session.completed` + `payment_status === "paid"`：信用卡等
+ *     同步卡类即时成功。
+ *   - `checkout.session.async_payment_succeeded`：ACH / SEPA / Oxxo 等延迟
+ *     类支付事后确认，这个事件发射时就表示收款落地（不需要再看 payment_status）。
+ */
+function isStripeCheckoutSuccess(
+  event: Stripe.Event,
+  session: Stripe.Checkout.Session,
+): boolean {
+  if (event.type === "checkout.session.async_payment_succeeded") return true;
+  if (event.type === "checkout.session.completed") {
+    return session.payment_status === "paid";
+  }
+  return false;
+}
 
 async function markEventProcessed(eventId: string) {
   await db
@@ -374,11 +396,10 @@ export async function markStripeOrderPaid(event: Stripe.Event): Promise<boolean>
     return true;
   }
 
-  // Success path. Stripe sometimes emits checkout.session.completed before the
-  // async PM authorizes; in that case payment_status is "unpaid" and we wait
-  // for the next event (async_payment_succeeded carries a session too — but
-  // we currently only subscribe to the success/failure variants below).
-  if (session.payment_status !== "paid") {
+  // Success path. completed + paid (同步卡) 或 async_payment_succeeded (延迟 PM)
+  // 都视为真实到账；其他情况（比如 completed 但 payment_status=unpaid 的 ACH）
+  // 等后续 async_payment_succeeded 再入账。
+  if (!isStripeCheckoutSuccess(event, session)) {
     await markEventProcessed(event.id);
     return false;
   }
