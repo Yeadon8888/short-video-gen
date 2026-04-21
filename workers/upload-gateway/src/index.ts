@@ -1,12 +1,25 @@
 interface Env {
   ASSETS_BUCKET: R2Bucket;
+  /** Admin key — grants full access (list / upload / delete). Server-side only. */
   UPLOAD_API_KEY: string;
+  /**
+   * Browser-facing key — only authorizes POST /upload. Optional; if unset,
+   * the worker falls back to checking UPLOAD_API_KEY alone (legacy behavior).
+   *
+   * Added 2026-04-21 so vidclaw-v2's /api/assets/upload-token can hand the
+   * browser a narrow-scope key instead of the admin key. Once this secret
+   * is set and vidclaw-v2 env has UPLOAD_CLIENT_KEY configured, the admin
+   * key is no longer exposed to the browser.
+   */
+  UPLOAD_CLIENT_KEY?: string;
   UPLOAD_PREFIX?: string;
   PUBLIC_BASE_URL?: string;
   MAX_UPLOAD_BYTES?: string;
   /** Comma-separated allowed origins, e.g. "https://vidclaw.com,https://app.vidclaw.com" */
   ALLOWED_ORIGINS?: string;
 }
+
+type AuthScope = "admin" | "client-upload";
 
 function getAllowedOrigins(env: Env): Set<string> {
   const raw = env.ALLOWED_ORIGINS?.trim();
@@ -82,10 +95,10 @@ export default {
 };
 
 async function handleUpload(request: Request, env: Env, url: URL, corsHeaders: Record<string, string>): Promise<Response> {
-  const authError = authorize(request, env, corsHeaders);
-  if (authError) {
-    return authError;
-  }
+  // Upload is the only endpoint that accepts the client-scope key; both admin
+  // and client-upload scopes pass here.
+  const auth = authorize(request, env, corsHeaders);
+  if (auth instanceof Response) return auth;
 
   const contentLength = Number.parseInt(request.headers.get("content-length") ?? "0", 10);
   const maxUploadBytes = Number.parseInt(env.MAX_UPLOAD_BYTES ?? "15728640", 10);
@@ -129,10 +142,8 @@ async function handleUpload(request: Request, env: Env, url: URL, corsHeaders: R
 }
 
 async function handleList(request: Request, env: Env, url: URL, corsHeaders: Record<string, string>): Promise<Response> {
-  const authError = authorize(request, env, corsHeaders);
-  if (authError) {
-    return authError;
-  }
+  const authError = requireAdminScope(authorize(request, env, corsHeaders), corsHeaders);
+  if (authError) return authError;
 
   const prefix = normalizePrefix(url.searchParams.get("prefix"), env.UPLOAD_PREFIX);
   if (!prefix) {
@@ -185,10 +196,8 @@ async function handleGetFile(request: Request, env: Env, url: URL, corsHeaders: 
 }
 
 async function handleDelete(request: Request, env: Env, url: URL, corsHeaders: Record<string, string>): Promise<Response> {
-  const authError = authorize(request, env, corsHeaders);
-  if (authError) {
-    return authError;
-  }
+  const authError = requireAdminScope(authorize(request, env, corsHeaders), corsHeaders);
+  if (authError) return authError;
 
   const key = url.pathname.replace(/^\/files\//, "");
   if (!key || key.includes("..")) {
@@ -199,13 +208,51 @@ async function handleDelete(request: Request, env: Env, url: URL, corsHeaders: R
   return json({ ok: true, key }, 200, corsHeaders);
 }
 
-function authorize(request: Request, env: Env, corsHeaders: Record<string, string>): Response | null {
-  const expectedKey = env.UPLOAD_API_KEY?.trim();
+/**
+ * Authorize a request. Returns the scope on success, or a 401 Response on failure.
+ *
+ *  - `admin` key → full access (list / upload / delete)
+ *  - `client-upload` key → upload only; list/delete return 403 even though
+ *    authentication succeeded.
+ *
+ * Timing-safe comparison isn't strictly necessary here because keys are random
+ * 32+ byte secrets and the worker is behind Cloudflare's edge, but we do a
+ * constant-time string compare anyway to avoid a casual-observer side channel.
+ */
+function authorize(
+  request: Request,
+  env: Env,
+  corsHeaders: Record<string, string>,
+): { scope: AuthScope } | Response {
+  const adminKey = env.UPLOAD_API_KEY?.trim();
+  const clientKey = env.UPLOAD_CLIENT_KEY?.trim();
   const providedKey = request.headers.get("x-upload-key")?.trim() ?? "";
-  if (!expectedKey || providedKey !== expectedKey) {
-    return json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  if (providedKey && adminKey && safeEqual(providedKey, adminKey)) {
+    return { scope: "admin" };
   }
-  return null;
+  if (providedKey && clientKey && safeEqual(providedKey, clientKey)) {
+    return { scope: "client-upload" };
+  }
+  return json({ error: "Unauthorized" }, 401, corsHeaders);
+}
+
+function requireAdminScope(
+  auth: { scope: AuthScope } | Response,
+  corsHeaders: Record<string, string>,
+): Response | null {
+  if (auth instanceof Response) return auth;
+  if (auth.scope === "admin") return null;
+  return json({ error: "Forbidden: admin scope required" }, 403, corsHeaders);
+}
+
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
 }
 
 function normalizePrefix(rawPrefix: string | null, fallbackPrefix: string | undefined): string | null {
