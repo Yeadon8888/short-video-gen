@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Development
-npm run dev          # Start Next.js dev server (Turbopack)
+npm run dev          # Start Next.js dev server (Next 16 uses Turbopack by default)
 npm run build        # Production build
 npm run lint         # ESLint
 
@@ -21,8 +21,8 @@ npm run db:push      # Push schema directly (dev only)
 npm run db:seed      # Seed initial data
 npm run db:studio    # Open Drizzle Studio GUI
 
-# Deployment
-npm run release:vercel  # Full release: test → build → migrate → deploy
+# Ops
+npm run supabase:cron:deploy  # Deploy Supabase scheduled cron jobs
 ```
 
 ## Architecture
@@ -35,13 +35,13 @@ Each major domain has its own `CLAUDE.md` with detailed architecture notes:
 
 - **`tasks/`** — Task lifecycle split into four independent responsibility lines: reconciliation (`reconciliation.ts`), downloads/ZIP (`downloads.ts`), expiry cleanup (`expiry.ts`), and async progression (`runner.ts`). Batch submission is rate-throttled through `batch-queue.ts` (2-second inter-request cadence, windowed submit count per round). See `src/lib/tasks/CLAUDE.md`.
 
-- **`video/`** — Provider adapter pattern. `service.ts` resolves the model and dispatches to a provider adapter; all provider-specific protocol details (URLs, field names, status words) are isolated in `providers/plato.ts` or `providers/yunwu.ts`. Failure classification lives in `providers/shared.ts`. See `src/lib/video/CLAUDE.md`.
+- **`video/`** — Provider adapter pattern. `service.ts` resolves the model and dispatches to a provider adapter; all provider-specific protocol details (URLs, field names, status words) are isolated in adapters under `src/lib/video/providers/` (currently `plato.ts`, `yunwu.ts`, `dashscope.ts`, `grok2api.ts`). Failure classification lives in `providers/shared.ts`. See `src/lib/video/CLAUDE.md`.
 
 - **`image-edit/`** — Async image transformation pipeline (product images → 9:16 white background). Runs as a separate worker from the video maintenance runner. See `src/lib/image-edit/CLAUDE.md`.
 
 - **`models/`** — DB-driven model registry with capabilities (`video_generation`, `image_edit`, `script_generation`). Models carry per-model API keys, default params, and credits-per-generation. See `src/lib/models/CLAUDE.md`.
 
-- **`payments/`** — Alipay integration. Payment orders flow: pending → paid → credits granted. See `src/lib/payments/CLAUDE.md`.
+- **`payments/`** — Alipay integration, with Stripe being added (see `src/app/api/payments/stripe/`). Payment orders flow: pending → paid → credits granted. See `src/lib/payments/CLAUDE.md`.
 
 - **`generate/`** — Orchestrates task creation: validates input, deducts credits, inserts task rows, and enqueues for processing.
 
@@ -61,7 +61,7 @@ scheduled → (clock fires) → pending
 
 - `/api/generate` — Create single task; `/api/generate/batch` — Create task group
 - `/api/tasks/refresh` — Poll provider status (called from client)
-- `/api/internal/tasks/tick` — Cron-triggered maintenance runner
+- `/api/internal/tasks/tick` — Cron-triggered maintenance runner. Requires `Authorization: Bearer $CRON_SECRET` (Vercel Cron) or `$INTERNAL_TICK_SECRET` (manual/internal trigger).
 - `/api/cron/timeout` — Timeout + refund stale tasks
 - `/api/admin/*` — Admin-only management endpoints
 
