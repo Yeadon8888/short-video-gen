@@ -4,6 +4,24 @@ import { tasks } from "@/lib/db/schema";
 import { failTaskAndRefund } from "@/lib/tasks/reconciliation";
 import { insertTaskItemsFromSubmission } from "@/lib/tasks/items";
 import { createVideoTasksForModelId } from "@/lib/video/service";
+import type { VideoDuration } from "@/lib/video/types";
+
+const SCHEDULED_DEFAULT_DURATION: VideoDuration = 10;
+
+function isVideoDuration(value: unknown): value is VideoDuration {
+  return (
+    value === 4 ||
+    value === 5 ||
+    value === 6 ||
+    value === 8 ||
+    value === 10 ||
+    value === 15
+  );
+}
+
+function normalizeScheduledDuration(value: unknown): VideoDuration {
+  return isVideoDuration(value) ? value : SCHEDULED_DEFAULT_DURATION;
+}
 
 export const SCHEDULED_BATCH_LIMIT = 20;
 
@@ -53,7 +71,7 @@ export async function processDueScheduledTasks(options?: {
           prompt: claimedTask.soraPrompt ?? "",
           imageUrls: p?.imageUrls ?? [],
           orientation: (p?.orientation as "portrait" | "landscape") ?? "portrait",
-          duration: (p?.duration === 8 ? 8 : p?.duration === 10 ? 10 : 15) as 8 | 10 | 15,
+          duration: normalizeScheduledDuration(p?.duration),
           count: p?.count ?? 1,
           model: p?.model ?? "",
         },

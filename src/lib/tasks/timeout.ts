@@ -1,4 +1,4 @@
-import { and, eq, inArray, lte } from "drizzle-orm";
+import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { taskItems, taskSlots, tasks } from "@/lib/db/schema";
 import {
@@ -24,10 +24,14 @@ export async function processTimedOutTasks(options?: {
   const cutoff = new Date(now.getTime() - TIMEOUT_MINUTES * 60 * 1000);
   const limit = options?.limit ?? 50;
 
+  // 用 started_at 优先判定"是否真的在跑了超过 TIMEOUT_MINUTES"；
+  // 对于定时/延迟任务，created_at 可能远早于真正开始，避免误判。
+  // started_at 为 null 时（还没被 claim）回退到 created_at。
+  const cutoffIso = cutoff.toISOString();
   const standardConditions = [
     inArray(tasks.status, ["generating", "polling", "analyzing"]),
     eq(tasks.fulfillmentMode, "standard"),
-    lte(tasks.createdAt, cutoff),
+    sql`COALESCE(${tasks.startedAt}, ${tasks.createdAt}) <= ${cutoffIso}::timestamptz`,
   ];
   const fulfillmentConditions = [
     inArray(tasks.status, ["generating", "polling", "analyzing"]),
@@ -101,6 +105,33 @@ export async function processTimedOutTasks(options?: {
       } catch {
         // Skip terminal reconciliation on ambiguous provider failures.
       }
+    }
+
+    // 重查 provider 之后还留在非终态的 item，判定为超时：直接标 FAILED
+    // 让 finalizeTaskIfTerminal 可以收口。之前这里只做查询不做强制，
+    // 任务就会长期卡在 generating/polling，timeout 机制名存实亡。
+    const queriedItems = await db
+      .select()
+      .from(taskItems)
+      .where(eq(taskItems.taskId, task.id));
+
+    const lingeringItemIds = queriedItems
+      .filter(
+        (item) => item.status !== "SUCCESS" && item.status !== "FAILED",
+      )
+      .map((item) => item.id);
+
+    if (lingeringItemIds.length > 0) {
+      await db
+        .update(taskItems)
+        .set({
+          status: "FAILED",
+          failReason: `超时未完成（>${TIMEOUT_MINUTES}分钟），已强制结束`,
+          retryable: false,
+          terminalClass: "timeout",
+          completedAt: new Date(),
+        })
+        .where(inArray(taskItems.id, lingeringItemIds));
     }
 
     const updatedItems = await db
