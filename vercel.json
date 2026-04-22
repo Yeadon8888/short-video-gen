@@ -3,7 +3,7 @@
   "framework": "nextjs",
   "installCommand": "npm install",
   "buildCommand": "npx tsx scripts/vercel-build.ts",
-  "regions": ["hkg1"],
+  "regions": ["sin1"],
   "functions": {
     "src/app/api/generate/route.ts": {
       "maxDuration": 300

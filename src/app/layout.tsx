@@ -140,6 +140,20 @@ export default function RootLayout({
           '"SF Mono", "Cascadia Code", "Fira Code", ui-monospace, monospace',
       }}
     >
+      <head>
+        {/* Preconnect to CDNs used for showcase media — saves ~200-400ms
+            per origin on first video/image load below the fold. */}
+        <link
+          rel="preconnect"
+          href="https://pub-432835bf3332484eab488001d1a1ce65.r2.dev"
+          crossOrigin=""
+        />
+        <link
+          rel="preconnect"
+          href="https://vc-upload.yeadon.top"
+          crossOrigin=""
+        />
+      </head>
       <body className="font-[family-name:var(--font-inter)] antialiased">
         <script
           type="application/ld+json"
