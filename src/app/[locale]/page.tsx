@@ -15,6 +15,7 @@ import { HeroDemoAnimation } from "@/components/landing/HeroDemoAnimation";
 import { ShowcaseGrid } from "@/components/landing/ShowcaseGrid";
 import { CursorGlow } from "@/components/landing/CursorGlow";
 import { LocaleSwitcher } from "@/components/landing/LocaleSwitcher";
+import { MobileNavMenu } from "@/components/landing/MobileNavMenu";
 
 const MARQUEE_MODELS = [
   "Sora 2",
@@ -107,7 +108,16 @@ export default async function LocalizedLanding({ params }: Props) {
               {t("nav.blog")}
             </Link>
           </nav>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <MobileNavMenu
+              items={[
+                { label: t("nav.models"), href: "#models", kind: "anchor" },
+                { label: t("nav.cases"), href: "#cases", kind: "anchor" },
+                { label: t("nav.pricing"), href: "#pricing", kind: "anchor" },
+                { label: t("nav.gallery"), href: "/gallery", kind: "route" },
+                { label: t("nav.blog"), href: "/blog", kind: "route" },
+              ]}
+            />
             <LocaleSwitcher />
             <Link
               href="/login"
@@ -209,7 +219,7 @@ export default async function LocalizedLanding({ params }: Props) {
               {MARQUEE_MODELS.concat(MARQUEE_MODELS).map((name, i) => (
                 <span
                   key={`${name}-${i}`}
-                  className="whitespace-nowrap text-xl font-semibold text-slate-400 hover:text-white"
+                  className="whitespace-nowrap text-sm font-semibold text-slate-400 hover:text-white sm:text-base md:text-xl"
                 >
                   {name}
                 </span>

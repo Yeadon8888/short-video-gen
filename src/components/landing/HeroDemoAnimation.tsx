@@ -193,13 +193,36 @@ export function HeroDemoAnimation() {
   /* Cleanup */
   useEffect(() => () => clearTimer(), []);
 
-  /* Preload ALL three mode videos */
+  /* Preload strategy: active mode now, others when browser is idle.
+     Avoids 3 parallel MP4 downloads competing with hydration. */
   useEffect(() => {
-    MODES.forEach((m) => {
-      const v = document.createElement("video");
-      v.preload = "auto";
-      v.src = m.video;
+    const now = document.createElement("video");
+    now.preload = "auto";
+    now.src = mode.video;
+
+    const idleCb = (cb: () => void) => {
+      if (typeof window.requestIdleCallback === "function") {
+        return window.requestIdleCallback(cb, { timeout: 3000 });
+      }
+      return window.setTimeout(cb, 1500);
+    };
+
+    const id = idleCb(() => {
+      for (const m of MODES) {
+        if (m.id === mode.id) continue;
+        const v = document.createElement("video");
+        v.preload = "auto";
+        v.src = m.video;
+      }
     });
+    return () => {
+      if (typeof window.cancelIdleCallback === "function") {
+        window.cancelIdleCallback(id as number);
+      } else {
+        window.clearTimeout(id as number);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const switchMode = useCallback((next: Mode) => {
@@ -440,13 +463,13 @@ export function HeroDemoAnimation() {
                     )}
                   </div>
 
-                  {/* Tags + generate button */}
-                  <div className="flex items-center justify-between pt-1">
-                    <div className="flex gap-1.5">
+                  {/* Tags + generate button — wraps on narrow screens */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                    <div className="flex flex-wrap gap-1.5">
                       {mode.tags.map((tag) => (
                         <span
                           key={tag}
-                          className="rounded-full border border-[var(--vc-border)] bg-[var(--vc-bg-root)] px-2 py-0.5 text-[10px] font-semibold text-slate-500"
+                          className="whitespace-nowrap rounded-full border border-[var(--vc-border)] bg-[var(--vc-bg-root)] px-2 py-0.5 text-[10px] font-semibold text-slate-500"
                         >
                           {tag}
                         </span>

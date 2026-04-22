@@ -60,7 +60,7 @@ export function LocaleSwitcher() {
       {open && (
         <div
           role="listbox"
-          className="absolute right-0 mt-2 w-40 overflow-hidden rounded-lg border border-white/10 bg-[#0d181b] shadow-xl shadow-black/40 ring-1 ring-white/5"
+          className="absolute right-0 mt-2 w-40 max-w-[calc(100vw-1rem)] overflow-hidden rounded-lg border border-white/10 bg-[#0d181b] shadow-xl shadow-black/40 ring-1 ring-white/5"
         >
           {routing.locales.map((loc) => {
             const active = locale === loc;

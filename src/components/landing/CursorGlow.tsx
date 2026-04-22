@@ -19,6 +19,10 @@ export function CursorGlow({
     const el = ref.current;
     if (!el) return;
 
+    // Skip on touch-only devices — no cursor to follow, listeners
+    // just waste cycles and the visual effect doesn't read right.
+    if (window.matchMedia("(hover: none)").matches) return;
+
     let raf = 0;
     let x = window.innerWidth / 2;
     let y = window.innerHeight / 3;
