@@ -5,16 +5,11 @@ import { useRef, useCallback, useState, useEffect } from "react";
 import Image from "next/image";
 
 const R2_BASE = "https://vc-upload.yeadon.top/files/vidclaw-assets/showcase";
+const GROK_R2 = "https://pub-432835bf3332484eab488001d1a1ce65.r2.dev/videos";
 
+// skincare / sneakers / coffee used in Hero demo — excluded from grid.
+// Videos generated via scripts/generate-showcase-videos.py (grok-imagine-video).
 const showcaseItems = [
-  {
-    title: "护肤精华液",
-    desc: "质地流动 · 特写广告",
-    cat: "美妆个护",
-    img: "/showcase/skincare.jpg",
-    video: `${R2_BASE}/skincare.mp4`,
-    gradient: "from-[#8B1A4A] to-[#4A0D28]",
-  },
   {
     title: "蓝牙耳机",
     desc: "沉浸开箱体验",
@@ -24,26 +19,11 @@ const showcaseItems = [
     gradient: "from-[#0D3A6B] to-[#061E3A]",
   },
   {
-    title: "运动鞋",
-    desc: "街拍穿搭展示",
-    cat: "服饰鞋包",
-    img: "/showcase/sneakers.jpg",
-    video: `${R2_BASE}/sneakers.mp4`,
-    gradient: "from-[#5C3A00] to-[#2E1D00]",
-  },
-  {
-    title: "手冲咖啡",
-    desc: "制作过程特写",
-    cat: "食品饮料",
-    img: "/showcase/coffee.jpg",
-    video: `${R2_BASE}/coffee.mp4`,
-    gradient: "from-[#5C2800] to-[#2E1200]",
-  },
-  {
     title: "香氛蜡烛",
     desc: "光影氛围广告",
     cat: "家居生活",
     img: "/showcase/candle.jpg",
+    video: `${GROK_R2}/vidclaw-showcase-candle.mp4`,
     gradient: "from-[#4A0068] to-[#25003A]",
   },
   {
@@ -51,6 +31,7 @@ const showcaseItems = [
     desc: "敲击 ASMR",
     cat: "3C 数码",
     img: "/showcase/keyboard.jpg",
+    video: `${GROK_R2}/vidclaw-showcase-keyboard.mp4`,
     gradient: "from-[#0D3A6B] to-[#061E3A]",
   },
   {
@@ -58,6 +39,7 @@ const showcaseItems = [
     desc: "瑜伽场景展示",
     cat: "服饰鞋包",
     img: "/showcase/yoga.jpg",
+    video: `${GROK_R2}/vidclaw-showcase-yoga.mp4`,
     gradient: "from-[#5C3A00] to-[#2E1D00]",
   },
   {
@@ -65,6 +47,7 @@ const showcaseItems = [
     desc: "功能演示短片",
     cat: "3C 数码",
     img: "/showcase/smartwatch.jpg",
+    video: `${GROK_R2}/vidclaw-showcase-smartwatch.mp4`,
     gradient: "from-[#0D3A6B] to-[#061E3A]",
   },
   {
@@ -72,6 +55,7 @@ const showcaseItems = [
     desc: "猫粮种草视频",
     cat: "宠物用品",
     img: "/showcase/catfood.jpg",
+    video: `${GROK_R2}/vidclaw-showcase-catfood.mp4`,
     gradient: "from-[#8B1A4A] to-[#4A0D28]",
   },
 ];

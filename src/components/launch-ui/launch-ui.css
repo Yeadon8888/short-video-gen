@@ -1,0 +1,326 @@
+/* launch-ui scoped styles — only active inside `.launch-ui-root` */
+
+@import "tw-animate-css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Register theme tokens globally so tailwind generates utility classes.
+   Values are set scoped under `.launch-ui-root` below. These token
+   names (`--color-brand`, `--color-primary`, etc.) don't collide with
+   vidclaw's existing globals.css which only maps
+   `--color-background` / `--color-foreground`. */
+@theme inline {
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-light: var(--light);
+  --color-light-foreground: var(--light-foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+
+  --spacing-container: 1280px;
+  --spacing-container-lg: 1536px;
+
+  --shadow-md: 0 4px 6px -1px var(--lui-shadow), 0 2px 4px -2px var(--lui-shadow);
+  --shadow-xl: 0 20px 25px -5px var(--lui-shadow), 0 8px 10px -6px var(--lui-shadow);
+  --shadow-2xl: 0 25px 50px -12px var(--lui-shadow);
+  --shadow-mockup: -12px 16px 48px var(--lui-shadow-strong);
+
+  --line-width: 1px;
+
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+  --animate-appear: appear 0.6s forwards ease-out;
+  --animate-appear-zoom: appear-zoom 0.6s forwards ease-out;
+  --animate-marquee: marquee var(--duration) infinite linear;
+  --animate-appear-zoom-fast: appear-zoom 0.3s forwards ease-out;
+  --animate-hover: hover 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-hover-reverse: hover-reverse 6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-pulse-fade: pulse-fade 6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-pulse-hover: pulse-hover 6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-spin-slow: spin 3s linear infinite;
+  --animate-wiggle: wiggle 1s ease-in-out infinite;
+  --animate-impulse: impulse 2s ease-in-out infinite;
+  --animate-appear-slide: appear-slide 0.5s forwards cubic-bezier(0.4, 0.18, 0.52, 1.6);
+  --animate-orbit: orbit 2s linear infinite;
+  --animate-rotate: rotate 8s linear infinite;
+  --animate-shiny-text: shiny-text 2.5s infinite;
+  --animate-reveal: reveal 3s forwards;
+  --animate-wave: wave 3s infinite ease-in-out;
+
+  @keyframes accordion-down {
+    from { height: 0; }
+    to { height: var(--radix-accordion-content-height); }
+  }
+  @keyframes accordion-up {
+    from { height: var(--radix-accordion-content-height); }
+    to { height: 0; }
+  }
+  @keyframes appear {
+    0% { opacity: 0; transform: translateY(1rem); filter: blur(0.5rem); }
+    50% { filter: blur(0); }
+    100% { opacity: 1; transform: translateY(0); filter: blur(0); }
+  }
+  @keyframes appear-zoom {
+    0% { opacity: 0; transform: scale(0.5); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+  @keyframes marquee {
+    from { transform: translateX(0); }
+    to { transform: translateX(calc(-100% - var(--gap))); }
+  }
+  @keyframes pulse-hover {
+    0% { opacity: 1; transform: translateY(0); }
+    50% { opacity: 0.5; transform: translateY(-1rem); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes hover {
+    0% { transform: translateY(0) translateX(0); }
+    50% { transform: translateY(-1rem) translateX(1rem); }
+    100% { transform: translateY(0) translateX(0); }
+  }
+  @keyframes hover-reverse {
+    0% { transform: translateY(0) translateX(0); }
+    50% { transform: translateY(1rem) translateX(1rem); }
+    100% { transform: translateY(0) translateX(0); }
+  }
+  @keyframes pulse-fade {
+    0% { opacity: 1; }
+    50% { opacity: 0.3; }
+    100% { opacity: 1; }
+  }
+  @keyframes wiggle {
+    0%, 16.67%, 33.33%, 50% { transform: rotate(-15deg); }
+    8.33%, 25%, 41.67% { transform: rotate(15deg); }
+    50%, 100% { transform: rotate(0deg); }
+  }
+  @keyframes impulse {
+    20% { left: 0; transform: scale(0.5); opacity: 0; }
+    50% { opacity: 1; left: 50%; transform: scale(3); }
+    80% { opacity: 0; left: 100%; transform: scale(0.5); }
+  }
+  @keyframes orbit {
+    0 { stroke-dashoffset: 500; opacity: 0; }
+    10%, 20% { opacity: 1; }
+    35% { opacity: 0; }
+    40% { opacity: 0; stroke-dashoffset: -250; }
+  }
+  @keyframes appear-slide {
+    0% { opacity: 0; transform: translateY(3rem) scale(0.5); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes rotate {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  @keyframes shiny-text {
+    0% { background-position: calc(-100% - 200px) 0; }
+    100% { background-position: calc(100% + 200px) 0; }
+  }
+  @keyframes reveal {
+    0% { filter: blur(10px); opacity: 0; }
+    100% { filter: blur(0px); opacity: 1; }
+  }
+  @keyframes wave {
+    0%, 100% { transform: scaleY(1); }
+    50% { transform: scaleY(1.5); }
+  }
+}
+
+/* Brand palette tokens (theme.css) */
+.launch-ui-root {
+  --brand-ember: oklch(66.5% 0.1804 47.04);
+  --brand-ember-foreground: oklch(75.77% 0.159 55.91);
+  --background-ember: oklch(97.65% 0.001 17.18);
+
+  --brand-titanium: oklch(52.97% 0.017 285.8);
+  --brand-titanium-foreground: oklch(63.88% 0.0126 286.04);
+  --background-titanium: oklch(97.63% 0.001 286.38);
+
+  --brand-electro: oklch(56.56% 0.212102 265.2452);
+  --brand-electro-foreground: oklch(82.72% 0.1426 178.93);
+  --background-electro: oklch(98.07% 0.0055 185.3);
+
+  --brand-ultraviolet: oklch(44.22% 0.2702 276.38);
+  --brand-ultraviolet-foreground: oklch(51.03% 0.2303 276.94);
+  --background-ultraviolet: oklch(97.53% 0.0045 254.98);
+
+  --radius-small: 0.25rem;
+  --radius-default: 0.5rem;
+  --radius-large: 1rem;
+
+  /* Default to titanium for VidClaw preview */
+  --brand: var(--brand-titanium);
+  --brand-foreground: var(--brand-titanium-foreground);
+
+  --background: oklch(97.65% 0.001 17.18);
+  --foreground: oklch(0.141 0.005 285.823);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.141 0.005 285.823);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.141 0.005 285.823);
+  --primary: light-dark(var(--brand-titanium), oklch(0.985 0 0));
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.967 0.001 286.375);
+  --secondary-foreground: oklch(0.21 0.006 285.885);
+  --muted: oklch(0.967 0.001 286.375);
+  --muted-foreground: oklch(0.552 0.016 285.938);
+  --accent: oklch(0.927 0.001 286.375);
+  --accent-foreground: oklch(0.21 0.006 285.885);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.577 0.245 27.325);
+  --border: oklch(0.92 0.004 286.32);
+  --input: oklch(0.92 0.004 286.32);
+  --ring: oklch(0.705 0.015 286.067);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --radius: 0.625rem;
+
+  --light: var(--brand);
+  --light-foreground: var(--brand-foreground);
+
+  --lui-shadow: #00000008;
+  --lui-shadow-strong: #00000008;
+
+  /* Override the vidclaw global body tokens so the preview area looks
+     like launch-ui's light theme despite the dark vc-bg-root body. */
+  --vc-bg-root: var(--background);
+  --vc-text: var(--foreground);
+
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.launch-ui-root.dark,
+.dark .launch-ui-root {
+  /* VidClaw brand override — teal accent on dark bg.
+     Overrides launch-ui's default titanium. */
+  --brand: #0dccf2;
+  --brand-foreground: #0a1214;
+
+  --background: oklch(0.141 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.141 0.005 285.823);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.141 0.005 285.823);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.985 0 0);
+  --primary-foreground: oklch(0.21 0.006 285.885);
+  --secondary: oklch(0.274 0.006 286.033);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.274 0.006 286.033);
+  --muted-foreground: oklch(0.705 0.015 286.067);
+  --accent: oklch(0.274 0.006 286.033);
+  --accent-foreground: oklch(0.985 0 0);
+  --border: oklch(0.885 0.006 286.033);
+  --input: oklch(0.274 0.006 286.033);
+  --ring: oklch(0.442 0.017 285.786);
+
+  --light: var(--foreground);
+  --light-foreground: var(--foreground);
+
+  --lui-shadow: #00000020;
+  --lui-shadow-strong: #00000088;
+}
+
+/* Base element styling scoped under the preview wrapper */
+.launch-ui-root * {
+  border-color: var(--border);
+}
+
+/* Glass utilities (from globals.css) */
+@utility glass-1 {
+  @apply border-border from-card/80 to-card/40 dark:border-border/10 dark:border-b-border/5 dark:border-t-border/20 dark:from-card/5 dark:to-card/0 border bg-linear-to-b;
+}
+@utility glass-2 {
+  @apply border-border from-card/100 to-card/80 dark:border-border/10 dark:border-b-border/5 dark:border-t-border/20 dark:from-card/10 dark:to-card/5 border bg-linear-to-b;
+}
+@utility glass-3 {
+  @apply border-border from-card/30 to-card/20 dark:border-border/10 dark:border-t-border/20 dark:border-b-border/5 dark:from-primary/5 dark:to-primary/2 border bg-linear-to-b;
+}
+@utility glass-4 {
+  @apply border-border border-b-input/90 from-card/60 to-card/20 dark:border-border/10 dark:border-t-border/30 dark:from-primary/10 dark:to-primary/5 border bg-linear-to-b dark:border-b-0;
+}
+@utility glass-5 {
+  @apply border-border border-b-input from-card/100 to-card/20 dark:border-border/10 dark:border-t-border/30 dark:from-primary/15 dark:to-primary/5 border bg-linear-to-b dark:border-b-0;
+}
+
+/* Fade effects */
+@utility fade-x {
+  mask-image: linear-gradient(to right, transparent 0%, black 25%, black 75%, transparent 100%);
+}
+@utility fade-y {
+  mask-image: linear-gradient(to top, transparent 0%, black 25%, black 75%, transparent 100%);
+}
+@utility fade-top {
+  mask-image: linear-gradient(to bottom, transparent 0%, black 35%);
+}
+@utility fade-bottom {
+  mask-image: linear-gradient(to top, transparent 0%, black 35%);
+}
+@utility fade-top-lg {
+  mask-image: linear-gradient(to bottom, transparent 15%, black 100%);
+}
+@utility fade-bottom-lg {
+  mask-image: linear-gradient(to top, transparent 15%, black 100%);
+}
+@utility fade-left {
+  mask-image: linear-gradient(to right, transparent 0%, black 35%);
+}
+@utility fade-right {
+  mask-image: linear-gradient(to left, transparent 0%, black 35%);
+}
+@utility fade-left-lg {
+  mask-image: linear-gradient(to right, transparent 15%, black 100%);
+}
+@utility fade-right-lg {
+  mask-image: linear-gradient(to left, transparent 15%, black 100%);
+}
+
+@utility line-y {
+  @apply border-border dark:border-border/10;
+  border-width: 0 var(--line-width, 0);
+}
+@utility line-x {
+  @apply border-border dark:border-border/10;
+  border-width: var(--line-width, 0) 0;
+}
+@utility line-b {
+  @apply border-border dark:border-border/10;
+  border-width: 0 0 var(--line-width, 0);
+}
+@utility line-t {
+  @apply border-border dark:border-border/10;
+  border-width: var(--line-width, 0) 0;
+}
+@utility line-dashed {
+  @apply border-dashed;
+}
