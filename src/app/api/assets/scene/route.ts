@@ -121,7 +121,7 @@ export async function POST(req: NextRequest) {
           // OSS is slow, fall back to storing the provider URL directly
           // so we don't blow the Vercel 300s function budget across
           // multiple styles.
-          let stored: { key: string; url: string; size: number };
+          let stored: { key: string; url: string; size?: number };
           try {
             const rendered = await Promise.race([
               resolveImageBuffer(result.imageUrl),
