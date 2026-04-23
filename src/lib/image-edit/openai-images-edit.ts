@@ -73,21 +73,39 @@ export async function openaiImagesEditRequest(params: {
   form.append("size", params.size ?? DEFAULT_SIZE);
 
   const baseUrl = normalizeBaseUrl(params.model.baseUrl);
-  const response = await fetchWithRetry(() =>
-    fetch(`${baseUrl}/v1/images/edits`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "application/json",
-      },
-      body: form,
-      // Per-image 120s. gpt-image-1 typically returns in ~50s; if we hit
-      // 120s the upstream is stuck (observed hanging indefinitely on
-      // slugs like gpt-image-2-all). Fail fast so one stuck image doesn't
-      // consume the scene route's whole 300s budget.
-      signal: AbortSignal.timeout(120_000),
-    }),
-  );
+  // Per-image 90s budget. gpt-image-1/2 typically return in ~30-50s;
+  // occasionally a heavier prompt ("model" style with a person) pushes
+  // over 90s. We do ONE retry on abort/timeout — most such stalls are
+  // upstream hiccups that clear on the second try, and 2×90s=180s still
+  // leaves headroom inside the 300s scene-route budget.
+  const doFetch = () =>
+    fetchWithRetry(() =>
+      fetch(`${baseUrl}/v1/images/edits`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          Accept: "application/json",
+        },
+        body: form,
+        signal: AbortSignal.timeout(90_000),
+      }),
+    );
+
+  let response: Response;
+  try {
+    response = await doFetch();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    const isAbort =
+      err instanceof Error &&
+      (err.name === "TimeoutError" ||
+        err.name === "AbortError" ||
+        msg.includes("aborted") ||
+        msg.includes("timeout"));
+    if (!isAbort) throw err;
+    // Retry once on abort — upstream hiccup usually clears fast.
+    response = await doFetch();
+  }
 
   const json = (await response.json()) as ImagesEditResponse;
 
