@@ -93,17 +93,22 @@ export async function POST(req: NextRequest) {
       }
 
       const generatedImages: { style: string; url: string; assetId: string }[] = [];
+      const baseName =
+        asset.filename?.replace(/\.[^.]+$/, "") ??
+        `asset-${asset.id.slice(0, 8)}`;
 
-      for (let i = 0; i < validStyles.length; i++) {
-        const style = validStyles[i];
-        send({
-          type: "progress",
-          current: i + 1,
-          total: validStyles.length,
-          style,
-          message: `正在生成第 ${i + 1}/${validStyles.length} 张（${style}）...`,
-        });
+      // Kick off all styles in parallel — each emits its own SSE events
+      // independently. Sending from multiple concurrent tasks to the same
+      // ReadableStream controller is safe because each enqueue is atomic.
+      send({
+        type: "progress",
+        current: 0,
+        total: validStyles.length,
+        style: "",
+        message: `并发生成 ${validStyles.length} 张图中...`,
+      });
 
+      async function processOne(style: SceneStyle, index: number) {
         try {
           const result = await generateProductSceneImage({
             assetUrl: asset.url,
@@ -112,15 +117,7 @@ export async function POST(req: NextRequest) {
             model,
           });
 
-          const baseName =
-            asset.filename?.replace(/\.[^.]+$/, "") ??
-            `asset-${asset.id.slice(0, 8)}`;
-
-          // Download + re-upload to our R2 so the URL is permanent
-          // (bltcy OSS URLs may expire). Cap at 45s — if the upstream
-          // OSS is slow, fall back to storing the provider URL directly
-          // so we don't blow the Vercel 300s function budget across
-          // multiple styles.
+          // Re-host to our R2 with 45s cap; fall back to provider URL.
           let stored: { key: string; url: string; size?: number };
           try {
             const rendered = await Promise.race([
@@ -140,16 +137,9 @@ export async function POST(req: NextRequest) {
               `[scene] re-host failed for ${style}, using provider URL:`,
               rehostErr,
             );
-            // Fallback: bltcy / yunwu direct URL. Still usable; user sees
-            // the image. R2 key left empty so cleanup jobs skip it.
-            stored = {
-              key: "",
-              url: result.imageUrl,
-              size: 0,
-            };
+            stored = { key: "", url: result.imageUrl, size: 0 };
           }
 
-          // Atomically: create asset + deduct credits
           const created = await db.transaction(async (tx) => {
             const [assetRow] = await tx
               .insert(userAssets)
@@ -199,7 +189,7 @@ export async function POST(req: NextRequest) {
             style,
             url: stored.url,
             assetId: created.id,
-            index: i + 1,
+            index: index + 1,
           });
         } catch (e) {
           send({
@@ -209,6 +199,8 @@ export async function POST(req: NextRequest) {
           });
         }
       }
+
+      await Promise.all(validStyles.map((style, i) => processOne(style, i)));
 
       // ── Save to tasks table for history ──
       let taskId: string | null = null;
