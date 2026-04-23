@@ -112,18 +112,42 @@ export async function POST(req: NextRequest) {
             model,
           });
 
-          // Download (handles both data URI and remote URL)
-          const rendered = await resolveImageBuffer(result.imageUrl);
           const baseName =
             asset.filename?.replace(/\.[^.]+$/, "") ??
             `asset-${asset.id.slice(0, 8)}`;
 
-          const stored = await uploadAsset({
-            userId: user.id,
-            filename: `${baseName}-${style}.png`,
-            data: rendered.buffer,
-            contentType: rendered.mimeType || "image/png",
-          });
+          // Download + re-upload to our R2 so the URL is permanent
+          // (bltcy OSS URLs may expire). Cap at 45s — if the upstream
+          // OSS is slow, fall back to storing the provider URL directly
+          // so we don't blow the Vercel 300s function budget across
+          // multiple styles.
+          let stored: { key: string; url: string; size: number };
+          try {
+            const rendered = await Promise.race([
+              resolveImageBuffer(result.imageUrl),
+              new Promise<never>((_, rej) =>
+                setTimeout(() => rej(new Error("rehost-timeout")), 45_000),
+              ),
+            ]);
+            stored = await uploadAsset({
+              userId: user.id,
+              filename: `${baseName}-${style}.png`,
+              data: rendered.buffer,
+              contentType: rendered.mimeType || "image/png",
+            });
+          } catch (rehostErr) {
+            console.warn(
+              `[scene] re-host failed for ${style}, using provider URL:`,
+              rehostErr,
+            );
+            // Fallback: bltcy / yunwu direct URL. Still usable; user sees
+            // the image. R2 key left empty so cleanup jobs skip it.
+            stored = {
+              key: "",
+              url: result.imageUrl,
+              size: 0,
+            };
+          }
 
           // Atomically: create asset + deduct credits
           const created = await db.transaction(async (tx) => {
