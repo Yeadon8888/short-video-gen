@@ -1,16 +1,21 @@
 /**
- * yunwu GPT-Image-{1,2} adapter.
+ * OpenAI-native /v1/images/edits adapter.
  *
- * Uses OpenAI-native `POST /v1/images/edits` (multipart/form-data),
- * NOT the chat/completions transport that bltcy.ts uses. The response
- * ships the edited image as base64; we return a data URL so the
- * existing scene-generation upload pipeline can ingest it unchanged.
+ * Works with any provider that implements the OpenAI images/edits
+ * contract: yunwu.ai, bltcy.ai, or OpenAI itself. Transport is
+ * multipart/form-data; response is either `data[i].b64_json` (OpenAI
+ * direct) or `data[i].url` (bltcy / OSS-backed proxies). Both are
+ * returned as-is to the caller — scene-generation re-uploads the
+ * result to our own R2 regardless.
+ *
+ * Distinct from bltcy.ts's chat/completions transport, which is how
+ * the Gemini-family image models are addressed via the chat API.
  */
 import type { Model } from "@/lib/db/schema";
 import { fetchWithRetry } from "@/lib/api/retry";
 import { fetchAssetBuffer } from "@/lib/storage/gateway";
 
-const DEFAULT_BASE_URL = "https://yunwu.ai";
+const DEFAULT_BASE_URL = "https://api.bltcy.ai";
 const DEFAULT_SIZE = "1024x1536"; // 2:3 portrait, closest to 9:16 in supported sizes
 
 function normalizeBaseUrl(baseUrl?: string | null) {
@@ -29,7 +34,7 @@ interface ImagesEditResponse {
  * Call yunwu's `/v1/images/edits` with a product image + prompt.
  * Returns an image URL (data URL for b64 responses, remote URL otherwise).
  */
-export async function yunwuImagesEditRequest(params: {
+export async function openaiImagesEditRequest(params: {
   assetUrl: string;
   prompt: string;
   model: Pick<Model, "slug" | "apiKey" | "baseUrl">;

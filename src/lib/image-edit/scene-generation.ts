@@ -11,8 +11,8 @@ import type { Model } from "@/lib/db/schema";
 import { bltcyImageRequest } from "@/lib/image-edit/bltcy";
 import {
   isOpenAiImagesEditModel,
-  yunwuImagesEditRequest,
-} from "@/lib/image-edit/yunwu-gpt-image";
+  openaiImagesEditRequest,
+} from "@/lib/image-edit/openai-images-edit";
 
 export type SceneStyle =
   | "lifestyle"
@@ -61,7 +61,7 @@ export async function generateProductSceneImage(params: {
     SCENE_PROMPTS.lifestyle;
 
   const imageUrl = isOpenAiImagesEditModel(model)
-    ? await yunwuImagesEditRequest({
+    ? await openaiImagesEditRequest({
         assetUrl: params.assetUrl,
         prompt,
         model,
