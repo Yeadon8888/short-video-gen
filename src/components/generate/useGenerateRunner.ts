@@ -277,15 +277,23 @@ export function useGenerateRunner(params: {
 
           if (event.type === "tasks") {
             const taskIds = event.taskIds ?? [];
-            if (taskIds.length > 0) {
+            const isFulfillmentTask =
+              event.fulfillmentMode === "backfill_until_target" && Boolean(event.dbTaskId);
+
+            if (taskIds.length > 0 || isFulfillmentTask) {
               pollingRef.current = true;
               setStage("POLL");
               if (event.sora_prompt) setSoraPrompt(event.sora_prompt);
               if (event.dbTaskId) setDbTaskId(event.dbTaskId);
               if (event.fulfillmentMode) setFulfillmentMode(event.fulfillmentMode);
-              addLog(`任务已提交: ${taskIds.join(", ").slice(0, 60)}`);
 
-              if (event.fulfillmentMode === "backfill_until_target" && event.dbTaskId) {
+              if (taskIds.length > 0) {
+                addLog(`任务已提交: ${taskIds.join(", ").slice(0, 60)}`);
+              } else {
+                addLog("任务已进入生成队列，后台将分批提交");
+              }
+
+              if (isFulfillmentTask && event.dbTaskId) {
                 addLog(`[目标补齐] 目标 ${event.requestedCount ?? taskIds.length} 条，补齐窗口 3 小时`);
                 void pollFulfillmentTask(
                   event.dbTaskId,

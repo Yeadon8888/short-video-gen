@@ -28,6 +28,7 @@ import {
   submitPendingSlots,
 } from "@/lib/tasks/fulfillment";
 import { computeDeliveryDeadline } from "@/lib/tasks/retry-policy";
+import { resolveStandaloneSubmissionPlan } from "@/lib/tasks/standalone-fulfillment";
 import type { OutputLanguage } from "@/lib/video/types";
 
 export const maxDuration = 300; // Vercel max
@@ -85,7 +86,7 @@ export async function POST(req: NextRequest) {
     scheduled,
     fulfillmentMode: rawFulfillmentMode,
   } = body;
-  const fulfillmentMode = rawFulfillmentMode === "backfill_until_target"
+  const requestedFulfillmentMode = rawFulfillmentMode === "backfill_until_target"
     ? "backfill_until_target" as const
     : "standard" as const;
   const effectiveSourceMode =
@@ -115,7 +116,15 @@ export async function POST(req: NextRequest) {
         const modelRow = await resolveActiveVideoModel(params.model);
         const modelSlug = modelRow.slug;
         const creditsPerGen = modelRow.creditsPerGen;
-        const totalCost = creditsPerGen * Math.min(Math.max(params.count, 1), 10);
+        const count = Math.min(Math.max(params.count, 1), 10);
+        const submissionPlan = resolveStandaloneSubmissionPlan({
+          requestedFulfillmentMode,
+          provider: modelRow.provider,
+          count,
+          scheduled: Boolean(scheduled),
+        });
+        const fulfillmentMode = submissionPlan.fulfillmentMode;
+        const totalCost = creditsPerGen * count;
 
         if (user.credits < totalCost) {
           send({
@@ -269,8 +278,6 @@ export async function POST(req: NextRequest) {
         });
 
         // ── Step 4: Check if scheduled (deferred) mode ──
-
-        const count = Math.min(Math.max(params.count, 1), 10);
 
         if (scheduled) {
           // Compute next 2:00 AM UTC+8
@@ -444,41 +451,45 @@ export async function POST(req: NextRequest) {
         let resolvedVideoParams: VideoParams;
 
         if (fulfillmentMode === "backfill_until_target") {
-          // Initialize slots, then submit one attempt per slot
           await initializeSlots(task.id, count);
-          try {
-            providerTaskIds = await submitPendingSlots(task);
-            // resolvedVideoParams is not returned by slot path — reconstruct a minimal version
-            resolvedVideoParams = {
-              prompt: soraPrompt,
-              imageUrls: referenceImageUrls,
-              orientation: params.orientation,
-              duration: params.duration,
-              count,
-              model: modelSlug,
-            };
-            log(`[目标补齐] 已提交 ${providerTaskIds.length}/${count} 个任务`);
-            if (providerTaskIds.length === 0) {
-              throw new Error("所有 slot 提交失败");
+          resolvedVideoParams = {
+            prompt: soraPrompt,
+            imageUrls: referenceImageUrls,
+            orientation: params.orientation,
+            duration: params.duration,
+            count,
+            model: modelSlug,
+          };
+
+          if (submissionPlan.submitInline) {
+            try {
+              providerTaskIds = await submitPendingSlots(task);
+              log(`[目标补齐] 已提交 ${providerTaskIds.length}/${count} 个任务`);
+              if (providerTaskIds.length === 0) {
+                throw new Error("所有 slot 提交失败");
+              }
+            } catch (e) {
+              await failTaskAndRefund({
+                taskId: task.id,
+                userId: user.id,
+                refundAmount: totalCost,
+                errorMessage: String(e).slice(0, 500),
+                refundReason: "视频提交失败自动退款",
+                allowedStatuses: ["generating"],
+              });
+              send({
+                type: "error",
+                code: "SORA_UNAVAILABLE",
+                message: "视频生成服务暂时不可用，积分已自动退还。",
+                sora_prompt: soraPrompt,
+              });
+              send({ type: "done" });
+              controller.close();
+              return;
             }
-          } catch (e) {
-            await failTaskAndRefund({
-              taskId: task.id,
-              userId: user.id,
-              refundAmount: totalCost,
-              errorMessage: String(e).slice(0, 500),
-              refundReason: "视频提交失败自动退款",
-              allowedStatuses: ["generating"],
-            });
-            send({
-              type: "error",
-              code: "SORA_UNAVAILABLE",
-              message: "视频生成服务暂时不可用，积分已自动退还。",
-              sora_prompt: soraPrompt,
-            });
-            send({ type: "done" });
-            controller.close();
-            return;
+          } else {
+            providerTaskIds = [];
+            log(`[目标补齐] 已入队 ${count} 个任务，后台将分批提交`);
           }
         } else {
           // Standard mode: submit all in one batch
