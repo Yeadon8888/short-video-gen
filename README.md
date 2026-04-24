@@ -1,5 +1,13 @@
 # VidClaw v2
 
+> 🏆 **参赛作品 · #AttraX春潮Spring黑客松**
+> Tag: `#AttraX春潮Spring黑客松`
+> Live Demo: https://video.yeadon.top
+> Slide: see [`hacthon.md`](./hacthon.md)
+>
+> **一句话介绍：** VidClaw 是一个 AI 电商短视频广告生成平台，上传一张产品图，3 分钟自动产出带脚本、文案、标签的带货视频；支持 8 种语言、Sora 2 / VEO 3.1 / Seedance / Hailuo / Grok 等主流模型统一调度，单条成本 ~¥1，已跑出单店单月 10 万+ 比索佣金的真实带货数据。
+
+
 VidClaw v2 是一个基于 Next.js 16 的短视频生成 Web 应用，支持三种输入方式：
 
 - 主题生成：输入一个主题，调用 Gemini 生成脚本与文案，再提交给视频模型生成视频
