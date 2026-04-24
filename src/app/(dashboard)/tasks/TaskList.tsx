@@ -92,7 +92,7 @@ export function TaskList({
       taskGroups.some((group) => ACTIVE_STATUSES.includes(group.status));
 
     if (hasActive && !timerRef.current) {
-      timerRef.current = setInterval(async () => {
+      const refresh = async () => {
         const currentTasks = taskListRef.current;
         const currentGroups = taskGroupRef.current;
         if (
@@ -102,7 +102,7 @@ export function TaskList({
           return;
         }
         try {
-          const res = await fetch("/api/tasks/refresh");
+          const res = await fetch("/api/tasks/refresh", { cache: "no-store" });
           if (!res.ok) return;
           const data = await res.json();
           setTaskList(data.tasks);
@@ -110,7 +110,9 @@ export function TaskList({
         } catch {
           // silently ignore
         }
-      }, POLL_INTERVAL);
+      };
+      void refresh();
+      timerRef.current = setInterval(refresh, POLL_INTERVAL);
     } else if (!hasActive && timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
@@ -194,7 +196,7 @@ export function TaskList({
                   </Link>
                   <TaskGroupDownloadButton
                     groupId={group.id}
-                    disabled={group.successCount === 0}
+                    disabled={false}
                   />
                 </div>
               </div>

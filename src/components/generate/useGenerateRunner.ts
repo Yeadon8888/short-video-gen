@@ -58,66 +58,81 @@ export function useGenerateRunner(params: {
     let lastProgressKey = "";
     let staleCount = 0;
 
+    async function pollOnce(poll: number) {
+      const res = await fetch(
+        `/api/generate/status?taskIds=${encodeURIComponent(taskIds.join(","))}`,
+        { signal, cache: "no-store" },
+      );
+      if (!res.ok) {
+        addLog(`[轮询] #${poll + 1} 失败: HTTP ${res.status}`);
+        return false;
+      }
+
+      const data = await res.json();
+      const results = data.results as PollResult[];
+      setPollResults(results);
+
+      for (const result of results) {
+        addLog(
+          `[轮询] ${result.taskId.slice(0, 14)}... 状态=${result.status} 进度=${result.progress}`,
+        );
+      }
+
+      if (data.allDone) {
+        const successUrls = results
+          .filter((result) => result.status === "SUCCESS" && result.url)
+          .map((result) => result.url!);
+
+        if (successUrls.length > 0) {
+          setVideoUrls(successUrls);
+          setStage("DONE");
+        } else {
+          const reasons = results
+            .filter((result) => result.status === "FAILED")
+            .map((result) => result.failReason ?? "未知原因")
+            .join("; ");
+          setError("SORA_FAILED", `视频生成失败: ${reasons}`, soraPrompt);
+        }
+        pollingRef.current = false;
+        return true;
+      }
+
+      const currentKey = results
+        .map((result) => `${result.taskId}:${result.status}:${result.progress}`)
+        .join("|");
+      const maxProgress = Math.max(...results.map((result) => parseInt(result.progress, 10) || 0));
+
+      if (currentKey === lastProgressKey) {
+        if (maxProgress < 80) staleCount += 1;
+        if (staleCount >= STALE_LIMIT) {
+          setError("POLL_STALE", "视频生成进度停滞，请检查任务后台。", soraPrompt);
+          pollingRef.current = false;
+          return true;
+        }
+      } else {
+        staleCount = 0;
+        lastProgressKey = currentKey;
+      }
+
+      return false;
+    }
+
+    setPollResults(taskIds.map((taskId) => ({
+      taskId,
+      status: "SUBMITTED",
+      progress: "0%",
+    })));
+
     for (let poll = 0; poll < MAX_POLLS; poll += 1) {
       if (signal?.aborted) return;
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
-      if (signal?.aborted) return;
+      if (poll > 0) {
+        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+        if (signal?.aborted) return;
+      }
 
       try {
-        const res = await fetch(
-          `/api/generate/status?taskIds=${encodeURIComponent(taskIds.join(","))}`,
-          { signal },
-        );
-        if (!res.ok) {
-          addLog(`[轮询] #${poll + 1} 失败: HTTP ${res.status}`);
-          continue;
-        }
-
-        const data = await res.json();
-        const results = data.results as PollResult[];
-        setPollResults(results);
-
-        for (const result of results) {
-          addLog(
-            `[轮询] ${result.taskId.slice(0, 14)}... 状态=${result.status} 进度=${result.progress}`,
-          );
-        }
-
-        if (data.allDone) {
-          const successUrls = results
-            .filter((result) => result.status === "SUCCESS" && result.url)
-            .map((result) => result.url!);
-
-          if (successUrls.length > 0) {
-            setVideoUrls(successUrls);
-            setStage("DONE");
-          } else {
-            const reasons = results
-              .filter((result) => result.status === "FAILED")
-              .map((result) => result.failReason ?? "未知原因")
-              .join("; ");
-            setError("SORA_FAILED", `视频生成失败: ${reasons}`, soraPrompt);
-          }
-          pollingRef.current = false;
-          return;
-        }
-
-        const currentKey = results
-          .map((result) => `${result.taskId}:${result.status}:${result.progress}`)
-          .join("|");
-        const maxProgress = Math.max(...results.map((result) => parseInt(result.progress, 10) || 0));
-
-        if (currentKey === lastProgressKey) {
-          if (maxProgress < 80) staleCount += 1;
-          if (staleCount >= STALE_LIMIT) {
-            setError("POLL_STALE", "视频生成进度停滞，请检查任务后台。", soraPrompt);
-            pollingRef.current = false;
-            return;
-          }
-        } else {
-          staleCount = 0;
-          lastProgressKey = currentKey;
-        }
+        const finished = await pollOnce(poll);
+        if (finished) return;
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
         addLog(`[轮询] 异常: ${String(error).slice(0, 100)}`);
@@ -140,15 +155,27 @@ export function useGenerateRunner(params: {
     const MAX_POLLS = 60; // up to 15 min of polling
     const signal = abortRef.current?.signal;
 
+    setDeliveryProgress({
+      requestedCount,
+      successfulCount: 0,
+      failedCount: 0,
+      pendingCount: requestedCount,
+      isComplete: false,
+      successUrls: [],
+      deliveryDeadlineAt,
+    });
+
     for (let poll = 0; poll < MAX_POLLS; poll += 1) {
       if (signal?.aborted) return;
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
-      if (signal?.aborted) return;
+      if (poll > 0) {
+        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+        if (signal?.aborted) return;
+      }
 
       try {
         const res = await fetch(
           `/api/generate/status?dbTaskId=${encodeURIComponent(dbTaskId)}`,
-          { signal },
+          { signal, cache: "no-store" },
         );
         if (!res.ok) {
           addLog(`[补齐轮询] #${poll + 1} 失败: HTTP ${res.status}`);
@@ -219,6 +246,7 @@ export function useGenerateRunner(params: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
         signal: ac.signal,
+        cache: "no-store",
       });
 
       if (!res.ok) {
@@ -341,6 +369,7 @@ export function useGenerateRunner(params: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
         signal: ac.signal,
+        cache: "no-store",
       });
 
       const data = (await res.json().catch(() => null)) as
@@ -366,8 +395,18 @@ export function useGenerateRunner(params: {
         taskIds: data?.taskIds ?? [],
         errors: data?.errors ?? [],
       });
-      addLog(`批量任务创建完成：成功 ${data?.createdCount ?? 0} 条`);
+      const createdTaskIds = data?.taskIds ?? [];
+      const createdCount = data?.createdCount ?? 0;
+      addLog(`批量任务创建完成：成功 ${createdCount} 条`);
+      if (createdTaskIds.length > 0) {
+        setPollResults(createdTaskIds.map((taskId) => ({
+          taskId,
+          status: "QUEUED",
+          progress: "0%",
+        })));
+      }
       setStage("DONE");
+      addLog("批量任务已进入后台队列，可在任务组持续查看进度。");
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
       setError("BATCH_FAILED", String(error));

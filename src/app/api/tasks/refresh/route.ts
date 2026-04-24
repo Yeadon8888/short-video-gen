@@ -39,5 +39,8 @@ export async function GET() {
     .orderBy(desc(taskGroups.createdAt))
     .limit(30);
 
-  return NextResponse.json({ tasks: userTasks, taskGroups: userTaskGroups });
+  return NextResponse.json(
+    { tasks: userTasks, taskGroups: userTaskGroups },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }

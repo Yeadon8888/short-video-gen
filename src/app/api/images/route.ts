@@ -27,14 +27,17 @@ export async function GET() {
       .where(and(eq(userAssets.userId, user.id), eq(userAssets.type, "image")))
       .orderBy(desc(userAssets.createdAt));
 
-    return NextResponse.json({
-      assets,
-      gateway_enabled: isUploadGatewayEnabled(),
-    });
+    return NextResponse.json(
+      {
+        assets,
+        gateway_enabled: isUploadGatewayEnabled(),
+      },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (e) {
     return NextResponse.json(
       { assets: [], gateway_enabled: isUploadGatewayEnabled(), error: String(e) },
-      { status: 502 },
+      { status: 502, headers: { "Cache-Control": "no-store" } },
     );
   }
 }

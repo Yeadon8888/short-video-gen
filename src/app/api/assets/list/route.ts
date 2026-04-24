@@ -23,5 +23,8 @@ export async function GET(_req: NextRequest) {
     .orderBy(desc(userAssets.createdAt))
     .limit(100);
 
-  return NextResponse.json({ assets });
+  return NextResponse.json(
+    { assets },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }

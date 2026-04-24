@@ -44,7 +44,10 @@ export async function GET(req: NextRequest) {
     .filter(Boolean))];
 
   if (providerTaskIds.length === 0) {
-    return NextResponse.json({ error: "Missing taskIds or dbTaskId" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Missing taskIds or dbTaskId" },
+      { status: 400, headers: { "Cache-Control": "no-store" } },
+    );
   }
 
   return handleStandardPoll(providerTaskIds, user.id);
@@ -74,7 +77,10 @@ async function handleStandardPoll(providerTaskIds: string[], userId: string) {
   );
 
   if (!scope) {
-    return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    return NextResponse.json(
+      { error: "Task not found" },
+      { status: 404, headers: { "Cache-Control": "no-store" } },
+    );
   }
 
   // Build a quick lookup of currently-stored row state so we can short-circuit
@@ -160,7 +166,10 @@ async function handleStandardPoll(providerTaskIds: string[], userId: string) {
     }
   }
 
-  return NextResponse.json({ results, allDone });
+  return NextResponse.json(
+    { results, allDone },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }
 
 // ─── Fulfillment poll ──────────────────────────────────────────────────────
@@ -173,7 +182,10 @@ async function handleFulfillmentPoll(dbTaskId: string, userId: string) {
     .limit(1);
 
   if (!task) {
-    return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    return NextResponse.json(
+      { error: "Task not found" },
+      { status: 404, headers: { "Cache-Control": "no-store" } },
+    );
   }
 
   await reconcileSuccessfulSlotItems(dbTaskId);
@@ -251,5 +263,5 @@ async function handleFulfillmentPoll(dbTaskId: string, userId: string) {
     isComplete: allSlotsDone,
     successUrls: progress.successUrls,
     deliveryDeadlineAt: task.deliveryDeadlineAt?.toISOString() ?? null,
-  });
+  }, { headers: { "Cache-Control": "no-store" } });
 }

@@ -22,7 +22,10 @@ export async function GET(req: NextRequest) {
     assetIds,
   });
 
-  return NextResponse.json({ jobs });
+  return NextResponse.json(
+    { jobs },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }
 
 export async function POST(req: NextRequest) {

@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { db } from "@/lib/db";
 import { taskGroups, tasks } from "@/lib/db/schema";
 import { requireAuth } from "@/lib/auth";

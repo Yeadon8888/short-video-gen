@@ -27,7 +27,7 @@ export function TaskZipDownloadButton({
 
     setLoading(true);
     try {
-      const response = await fetch(`/api/tasks/${taskId}/downloads`);
+      const response = await fetch(`/api/tasks/${taskId}/downloads`, { cache: "no-store" });
       if (!response.ok) {
         const data = (await response.json().catch(() => null)) as
           | { error?: string }

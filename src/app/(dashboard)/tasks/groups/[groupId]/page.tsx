@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, asc, eq } from "drizzle-orm";
@@ -101,7 +103,7 @@ export default async function TaskGroupDetailPage({
           </Link>
           <TaskGroupDownloadButton
             groupId={group.id}
-            disabled={group.successCount === 0}
+            disabled={false}
           />
           {group.batchTheme && <CopyTextButton text={group.batchTheme} />}
           {productOrderText && <CopyTextButton text={productOrderText} />}

@@ -21,7 +21,7 @@ export async function fetchProductImages(): Promise<ProductImageAsset[]> {
   if (cachedAssets) return cachedAssets;
 
   if (!cachedAssetsPromise) {
-    cachedAssetsPromise = fetch("/api/images")
+    cachedAssetsPromise = fetch("/api/images", { cache: "no-store" })
       .then(async (res) => {
         if (!res.ok) {
           return { assets: [] as ProductImageAsset[] };

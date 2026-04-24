@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Upload, Trash2, Image as ImageIcon, Wand2, Loader2, Check, X } from "lucide-react";
+import { Upload, Trash2, Image as ImageIcon, Wand2, Loader2, Check, X, Download } from "lucide-react";
 import type { UserAsset } from "@/lib/db/schema";
 import {
   inspectReferenceImageUpload,
@@ -111,6 +111,16 @@ function closeImageBitmap(bitmap: ImageBitmap | HTMLImageElement) {
   if ("close" in bitmap && typeof bitmap.close === "function") {
     bitmap.close();
   }
+}
+
+function triggerDownload(url: string, filename: string) {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
 // Result assets created by the 9:16 white-bg pipeline carry this filename suffix.
@@ -254,6 +264,51 @@ export function AssetGrid({ initialAssets }: { initialAssets: UserAsset[] }) {
       setError(`网络错误: ${String(err).slice(0, 100)}`);
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function handleDownload(assetId: string, filename: string | null) {
+    setError(null);
+    try {
+      const res = await fetch(`/api/assets/${assetId}/download`, {
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(data?.error ?? `下载失败 (HTTP ${res.status})`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      triggerDownload(url, filename || `product-image-${assetId.slice(0, 8)}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "下载失败");
+    }
+  }
+
+  async function handleBatchDownload() {
+    if (selectedIds.size === 0) return;
+    setError(null);
+    setInfo(null);
+    setBatchBusy(true);
+    try {
+      const res = await fetch("/api/assets/downloads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assetIds: Array.from(selectedIds) }),
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(data?.error ?? `打包失败 (HTTP ${res.status})`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      triggerDownload(url, "product-images.zip");
+      setInfo(`已开始下载 ${selectedIds.size} 张图片的 ZIP。`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "批量下载失败");
+    } finally {
+      setBatchBusy(false);
     }
   }
 
@@ -431,6 +486,14 @@ export function AssetGrid({ initialAssets }: { initialAssets: UserAsset[] }) {
               一键转 9:16
             </button>
             <button
+              onClick={handleBatchDownload}
+              disabled={batchBusy}
+              className="inline-flex items-center gap-1 rounded-[var(--vc-radius-sm)] border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-300 transition-colors hover:bg-emerald-500/20 disabled:opacity-50"
+            >
+              <Download className="h-3.5 w-3.5" />
+              批量下载 ZIP
+            </button>
+            <button
               onClick={handleBatchDelete}
               disabled={batchBusy}
               className="inline-flex items-center gap-1 rounded-[var(--vc-radius-sm)] border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs text-red-300 transition-colors hover:bg-red-500/20 disabled:opacity-50"
@@ -518,7 +581,7 @@ export function AssetGrid({ initialAssets }: { initialAssets: UserAsset[] }) {
                   </div>
                 )}
 
-                <div className="pointer-events-none absolute inset-0 flex items-end bg-gradient-to-t from-black/70 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+                <div className="pointer-events-none absolute inset-0 flex items-end bg-gradient-to-t from-black/70 to-transparent opacity-100 transition-opacity duration-200 sm:opacity-0 sm:group-hover:opacity-100">
                   <div className="pointer-events-auto flex w-full items-center justify-between gap-2 p-2">
                     <span className="truncate text-xs text-white">
                       {asset.filename}
@@ -534,7 +597,15 @@ export function AssetGrid({ initialAssets }: { initialAssets: UserAsset[] }) {
                         </button>
                       )}
                       <button
+                        onClick={() => handleDownload(asset.id, asset.filename)}
+                        title="下载图片"
+                        className="rounded-[var(--vc-radius-sm)] p-1 text-emerald-300 transition-colors hover:bg-emerald-500/20"
+                      >
+                        <Download className="h-4 w-4" />
+                      </button>
+                      <button
                         onClick={() => handleDelete(asset.id)}
+                        title="删除图片"
                         className="rounded-[var(--vc-radius-sm)] p-1 text-red-400 transition-colors hover:bg-red-500/20"
                       >
                         <Trash2 className="h-4 w-4" />
