@@ -96,19 +96,34 @@ Sora 2 / VEO 3.1 / Seedance / Hailuo / Grok 可配置化接入，
 
 ---
 
-## Slide 7 · 技术架构 · 10 分钟能讲清楚的栈
+## Slide 7 · 技术架构 · 现代 Serverless 全家桶
 
-**前端** · Next.js 16 App Router · Turbopack · Zustand · Tailwind
-**后端** · Next.js API Routes · Drizzle ORM · Postgres (Supabase)
-**AI 层** · Gemini 多模态（视频拆解）· 6 家视频 Provider 适配器 · OpenAI 图像编辑
-**基础设施** · Vercel · Cloudflare Worker 上传网关（两 Key 权限模型）· Supabase pg_cron
-**支付** · Stripe + 支付宝双通道，Webhook 双层幂等
+```
+    用户 ──▶ Cloudflare (代理 / 边缘加速 / 上传网关)
+              │
+              ▼
+         Vercel (Next.js 16 前端 + API Routes)
+              │
+       ┌──────┼───────────────┐
+       ▼      ▼               ▼
+   Supabase  Supabase     AI Providers
+  (Postgres) (Auth SSR)   (Gemini / Sora 2 / VEO 3.1
+                          / Seedance / Hailuo / Grok)
+```
+
+**前端 · Vercel** · Next.js 16 App Router · Turbopack · React 19 · Zustand · Tailwind v4
+**代理 · Cloudflare** · 全球边缘代理 + Worker 上传网关（两 Key 权限模型 · 域名/CDN 统一收口）
+**数据库 · Supabase** · Postgres + Drizzle ORM · pg_cron 跑分钟级任务 tick · RLS 多租户隔离
+**登录 · Supabase Auth** · SSR 适配 · Middleware 保护 `(dashboard)` 路由 · OAuth 一键登录
+**AI 层** · Gemini 多模态（视频拆解）· 6 家视频 Provider 适配器（统一调度）· OpenAI / GPT-Image-2 图像编辑
+**支付** · Stripe（海外）+ 支付宝（国内）双通道 · Webhook 双层幂等
 
 **核心工程亮点：**
 - 任务状态机：`pending → analyzing → generating → polling → done/failed`
 - Slot 级交付：批量任务中任何一条失败自动补齐到目标数量
 - 分钟级 tick + 300s 预算调度：同步阻塞型 API（Grok ~90s）不拖慢其他任务
 - 失败自动退款：积分 / Stripe 事件双重幂等保证
+- Vercel 自动部署 + Drizzle 生产库迁移前置，杜绝「代码上线 / DB 未迁移」故障
 
 ---
 
