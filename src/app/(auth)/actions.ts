@@ -4,9 +4,7 @@ import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { createAppUserForAuthUser } from "@/lib/onboarding";
 
 export async function login(formData: FormData) {
   const supabase = await createClient();
@@ -44,25 +42,11 @@ export async function signup(formData: FormData) {
   // Create app user record
   if (authData.user) {
     try {
-      const existing = await db
-        .select()
-        .from(users)
-        .where(eq(users.authId, authData.user.id))
-        .limit(1);
-
-      if (existing.length === 0) {
-        // Check if this is the first user → make admin
-        const allUsers = await db.select({ id: users.id }).from(users).limit(1);
-        const isFirstUser = allUsers.length === 0;
-
-        await db.insert(users).values({
-          authId: authData.user.id,
-          email,
-          name,
-          role: isFirstUser ? "admin" : "user",
-          credits: isFirstUser ? 9999 : 0,
-        });
-      }
+      await createAppUserForAuthUser({
+        authId: authData.user.id,
+        email,
+        name,
+      });
     } catch (dbError) {
       console.error("[signup] DB error:", dbError);
       return { error: "账号创建失败，请稍后再试" };

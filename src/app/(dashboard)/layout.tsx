@@ -1,9 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
 import { getAuthUser } from "@/lib/auth";
+import { createAppUserForAuthUser } from "@/lib/onboarding";
 import { DashboardShell } from "@/components/dashboard/DashboardShell";
 
 export default async function DashboardLayout({
@@ -40,22 +38,14 @@ export default async function DashboardLayout({
   }
 
   // User exists in Supabase but not in our DB — auto-create
-  const allUsers = await db.select({ id: users.id }).from(users).limit(1);
-  const isFirstUser = allUsers.length === 0;
-
-  const [newUser] = await db
-    .insert(users)
-    .values({
-      authId: supabaseUser.id,
-      email: supabaseUser.email!,
-      name:
-        supabaseUser.user_metadata?.full_name ??
-        supabaseUser.user_metadata?.name ??
-        supabaseUser.email!.split("@")[0],
-      role: isFirstUser ? "admin" : "user",
-      credits: isFirstUser ? 9999 : 0,
-    })
-    .returning();
+  const newUser = await createAppUserForAuthUser({
+    authId: supabaseUser.id,
+    email: supabaseUser.email!,
+    name:
+      supabaseUser.user_metadata?.full_name ??
+      supabaseUser.user_metadata?.name ??
+      supabaseUser.email!.split("@")[0],
+  });
 
   if (newUser.status !== "active") {
     redirect("/login?error=suspended");
