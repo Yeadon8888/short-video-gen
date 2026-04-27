@@ -73,6 +73,41 @@ export function resolveSubmittedSlotSuccessReconciliation(
   };
 }
 
+export function resolveSlotSubmissionClaim(
+  slot: Pick<TaskSlot, "status" | "attemptCount">,
+): { previousAttemptCount: number; nextAttemptNo: number } | null {
+  if (slot.status !== "pending" && slot.status !== "submitted") return null;
+  return {
+    previousAttemptCount: slot.attemptCount,
+    nextAttemptNo: slot.attemptCount + 1,
+  };
+}
+
+async function releaseSlotSubmissionClaim(params: {
+  slot: Pick<TaskSlot, "id" | "status" | "attemptCount">;
+  claimedAttemptNo: number;
+}) {
+  await db
+    .update(taskSlots)
+    .set({
+      status: params.slot.status,
+      attemptCount: params.slot.attemptCount,
+      lastFailReason: "视频供应商提交失败，等待重试",
+    })
+    .where(
+      and(
+        eq(taskSlots.id, params.slot.id),
+        eq(taskSlots.status, "submitted"),
+        eq(taskSlots.attemptCount, params.claimedAttemptNo),
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${taskItems}
+          WHERE ${taskItems.slotId} = ${params.slot.id}
+            AND ${taskItems.attemptNo} = ${params.claimedAttemptNo}
+        )`,
+      ),
+    );
+}
+
 export async function reconcileSuccessfulSlotItems(taskId: string): Promise<number> {
   const rows = await db
     .select({
@@ -169,6 +204,28 @@ export async function submitSlotAttempt(params: {
   const model = await getVideoModelById(task.modelId);
   if (!model) return null;
 
+  const claim = resolveSlotSubmissionClaim(slot);
+  if (!claim) return null;
+
+  const [claimedSlot] = await db
+    .update(taskSlots)
+    .set({
+      status: "submitted",
+      attemptCount: claim.nextAttemptNo,
+      lastFailReason: null,
+      lastTerminalClass: null,
+    })
+    .where(
+      and(
+        eq(taskSlots.id, slot.id),
+        eq(taskSlots.status, slot.status),
+        eq(taskSlots.attemptCount, claim.previousAttemptCount),
+      ),
+    )
+    .returning({ id: taskSlots.id });
+
+  if (!claimedSlot) return null;
+
   let providerTaskIds: string[];
   let immediateResults: (import("@/lib/video/types").TaskStatusResult | null)[] | undefined;
   try {
@@ -187,22 +244,30 @@ export async function submitSlotAttempt(params: {
     providerTaskIds = submitted.providerTaskIds;
     immediateResults = submitted.immediateResults;
   } catch {
+    await releaseSlotSubmissionClaim({
+      slot,
+      claimedAttemptNo: claim.nextAttemptNo,
+    });
     return null;
   }
 
-  if (providerTaskIds.length === 0) return null;
+  if (providerTaskIds.length === 0) {
+    await releaseSlotSubmissionClaim({
+      slot,
+      claimedAttemptNo: claim.nextAttemptNo,
+    });
+    return null;
+  }
   const providerTaskId = providerTaskIds[0];
   const immediate = immediateResults?.[0] ?? null;
   const isImmediateSuccess = immediate?.status === "SUCCESS" && Boolean(immediate.url);
-
-  const newAttemptNo = slot.attemptCount + 1;
 
   const [item] = await db
     .insert(taskItems)
     .values({
       taskId: task.id,
       slotId: slot.id,
-      attemptNo: newAttemptNo,
+      attemptNo: claim.nextAttemptNo,
       providerTaskId,
       status: isImmediateSuccess ? "SUCCESS" : "PENDING",
       progress: isImmediateSuccess ? "100%" : "0%",
@@ -215,12 +280,18 @@ export async function submitSlotAttempt(params: {
     .update(taskSlots)
     .set({
       status: isImmediateSuccess ? "success" : "submitted",
-      attemptCount: newAttemptNo,
+      attemptCount: claim.nextAttemptNo,
       winnerItemId: isImmediateSuccess ? item.id : null,
       resultUrl: isImmediateSuccess ? immediate!.url : null,
       completedAt: isImmediateSuccess ? new Date() : null,
     })
-    .where(eq(taskSlots.id, slot.id));
+    .where(
+      and(
+        eq(taskSlots.id, slot.id),
+        eq(taskSlots.status, "submitted"),
+        eq(taskSlots.attemptCount, claim.nextAttemptNo),
+      ),
+    );
 
   if (isImmediateSuccess) {
     const successSlots = await db

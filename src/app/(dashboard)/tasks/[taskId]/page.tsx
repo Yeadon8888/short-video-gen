@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { and, asc, eq } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { taskItems, tasks } from "@/lib/db/schema";
+import { taskItems, taskSlots, tasks } from "@/lib/db/schema";
 import type { ScriptResult, TaskParamsSnapshot } from "@/lib/video/types";
 import { CopyTextButton } from "@/components/ui/CopyTextButton";
 import { TaskDetailAutoRefresh } from "@/components/tasks/TaskDetailAutoRefresh";
@@ -68,11 +68,47 @@ export default async function TaskDetailPage({
 
   if (!task) notFound();
 
-  const items = await db
+  const rawItems = await db
     .select()
     .from(taskItems)
     .where(eq(taskItems.taskId, task.id))
     .orderBy(asc(taskItems.createdAt));
+  const slots = await db
+    .select()
+    .from(taskSlots)
+    .where(eq(taskSlots.taskId, task.id))
+    .orderBy(asc(taskSlots.slotIndex));
+  const itemsById = new Map(rawItems.map((item) => [item.id, item]));
+  const latestItemBySlotId = new Map<string, (typeof rawItems)[number]>();
+  for (const item of rawItems) {
+    if (!item.slotId) continue;
+    latestItemBySlotId.set(item.slotId, item);
+  }
+  const displayItems =
+    slots.length > 0
+      ? slots.map((slot) => {
+          const item = slot.winnerItemId
+            ? itemsById.get(slot.winnerItemId)
+            : latestItemBySlotId.get(slot.id);
+          return {
+            id: slot.id,
+            label: `子任务 ${slot.slotIndex + 1}`,
+            providerTaskId: item?.providerTaskId ?? null,
+            status: item?.status ?? (slot.status === "success" ? "SUCCESS" : slot.status.toUpperCase()),
+            progress: item?.progress ?? (slot.status === "success" ? "100%" : "0%"),
+            resultUrl: slot.resultUrl ?? item?.resultUrl ?? null,
+            failReason: slot.lastFailReason ?? item?.failReason ?? null,
+          };
+        })
+      : rawItems.map((item, index) => ({
+          id: item.id,
+          label: `子任务 ${index + 1}`,
+          providerTaskId: item.providerTaskId,
+          status: item.status,
+          progress: item.progress,
+          resultUrl: item.resultUrl,
+          failReason: item.failReason,
+        }));
 
   const paramsJson = (task.paramsJson ?? {}) as TaskParamsSnapshot;
   const script = (task.scriptJson ?? null) as ScriptResult | null;
@@ -364,13 +400,13 @@ export default async function TaskDetailPage({
 
       <Section title="执行记录">
         <div className="space-y-3">
-          {items.length > 0 ? (
-            items.map((item, index) => (
+          {displayItems.length > 0 ? (
+            displayItems.map((item) => (
               <div
                 key={item.id}
                 className="rounded-2xl border border-[var(--vc-border)] px-4 py-3 text-sm text-[var(--vc-text-secondary)]"
               >
-                <p className="text-white">子任务 {index + 1}</p>
+                <p className="text-white">{item.label}</p>
                 <p>Provider Task ID：{item.providerTaskId || "—"}</p>
                 <p>状态：{item.status}</p>
                 <p>进度：{item.progress}</p>

@@ -151,6 +151,10 @@ export function TaskList({
               const { group } = item;
             const cfg = statusConfig[group.status] ?? statusConfig.pending;
             const Icon = cfg.icon;
+            const groupSuccessCount = Math.min(
+              group.successCount,
+              Math.max(group.requestedCount, 0),
+            );
             return (
               <div
                 key={group.id}
@@ -170,14 +174,14 @@ export function TaskList({
                       批量带货
                     </span>
                     <span className="text-xs text-[var(--vc-text-muted)]">
-                      {group.successCount}/{group.requestedCount} 成功
+                      {groupSuccessCount}/{group.requestedCount} 成功
                     </span>
                   </div>
                   <span className="text-xs text-[var(--vc-text-dim)]">
                     {new Date(group.createdAt).toLocaleString("zh-CN")}
                     {shouldShowVideoExpiryCountdown({
                       status: group.status,
-                      successCount: group.successCount ?? 0,
+                      successCount: groupSuccessCount,
                     }) && renderExpiryCountdown(group.createdAt)}
                   </span>
                 </div>

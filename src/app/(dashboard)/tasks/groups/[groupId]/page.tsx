@@ -61,6 +61,11 @@ export default async function TaskGroupDetailPage({
   const targetVideoCount =
     group.requestedCount ??
     computeBatchTotalVideoCount(batchProductCount, batchUnitsPerProduct);
+  const displayedSuccessCount = Math.min(group.successCount, targetVideoCount);
+  const displayedFailedCount = Math.min(
+    group.failedCount,
+    Math.max(targetVideoCount - displayedSuccessCount, 0),
+  );
   const productOrderText = selectedAssets
     .map((asset, index) => `${index + 1}. ${asset.filename || asset.id}`)
     .join("\n");
@@ -119,8 +124,8 @@ export default async function TaskGroupDetailPage({
           <div>商品数：{batchProductCount}</div>
           <div>每商品条数：{batchUnitsPerProduct}</div>
           <div>计划总视频：{targetVideoCount}</div>
-          <div>成功：{group.successCount}</div>
-          <div>失败：{group.failedCount}</div>
+          <div>成功：{displayedSuccessCount}</div>
+          <div>失败：{displayedFailedCount}</div>
           <div>选图策略：{group.selectionMode || "sequence"}</div>
           <div>积分：{group.creditsCost}</div>
         </div>
