@@ -43,7 +43,7 @@ export function resolveLanguageSpec(outputLanguage?: OutputLanguage): {
   return {
     spoken: lang.spokenName,
     content: lang.spokenName,
-    instruction: `All spoken dialogue, voiceover, title, caption, hashtags, and first_comment must be in ${lang.spokenName}. Do not silently switch to English or any other language.`,
+    instruction: `All spoken dialogue, voiceover, title, caption, hashtags, and first_comment must be in ${lang.spokenName}. Do not output English copy unless the selected output language is English. For Malay (Malaysia), use Malay as used in Malaysia. Do not silently switch to English or any other language.`,
   };
 }
 

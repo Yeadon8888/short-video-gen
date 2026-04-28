@@ -14,7 +14,7 @@ import { MODEL_CAPABILITIES } from "@/lib/models/capabilities";
 import { uploadAsset } from "@/lib/storage/gateway";
 import { resolveImageBuffer } from "@/lib/image-edit/payload";
 
-export const maxDuration = 300;
+export const maxDuration = 800;
 
 const VALID_STYLES = new Set<SceneStyle>([
   "lifestyle",
@@ -36,6 +36,22 @@ const VALID_REGIONS = new Set<SceneRegion>([
 ]);
 
 const VALID_LANGUAGES = new Set<ScenePromptLanguage>(["zh", "en"]);
+
+function formatSceneGenerationError(style: SceneStyle, error: unknown) {
+  const message = error instanceof Error ? error.message : "未知错误";
+  const lower = message.toLowerCase();
+  const isTimeout =
+    error instanceof DOMException ||
+    lower.includes("timeout") ||
+    lower.includes("timed out") ||
+    lower.includes("aborted");
+
+  if (isTimeout) {
+    return `${style} 生成耗时过长。供应商可能仍在后台处理，请稍后到任务列表或素材库查看结果，避免重复提交。`;
+  }
+
+  return `${style} 生成失败: ${message.slice(0, 100)}`;
+}
 
 /**
  * POST /api/assets/scene — Generate scene images for a product
@@ -224,7 +240,7 @@ export async function POST(req: NextRequest) {
           send({
             type: "error",
             style,
-            message: `${style} 生成失败: ${e instanceof Error ? e.message.slice(0, 100) : "未知错误"}`,
+            message: formatSceneGenerationError(style, e),
           });
         }
       }

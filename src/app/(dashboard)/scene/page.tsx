@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   Loader2,
   Check,
@@ -182,7 +183,13 @@ export default function ScenePage() {
         }
       }
     } catch {
-      setErrors(["网络错误，请重试。"]);
+      const isSlowOpenAiImageModel =
+        selectedModelSlug?.toLowerCase().startsWith("gpt-image") ?? false;
+      setErrors([
+        isSlowOpenAiImageModel
+          ? "GPT Image 生成耗时过长，供应商可能仍在后台处理。请稍后到任务列表或素材库查看结果；不要立刻重复提交，避免重复扣费。"
+          : "网络错误，请重试。",
+      ]);
     } finally {
       setGenerating(false);
     }
@@ -190,6 +197,8 @@ export default function ScenePage() {
 
   const perImageCost = selectedModel?.creditsPerGen ?? 3;
   const totalCost = selectedStyles.size * perImageCost;
+  const selectedModelIsSlow =
+    selectedModelSlug?.toLowerCase().startsWith("gpt-image") ?? false;
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 p-4 md:p-8">
@@ -244,9 +253,9 @@ export default function ScenePage() {
             {assets.length === 0 ? (
               <p className="mt-3 text-sm text-slate-500">
                 请先去{" "}
-                <a href="/assets" className="text-[var(--vc-accent)]">
+                <Link href="/assets" className="text-[var(--vc-accent)]">
                   素材库
-                </a>{" "}
+                </Link>{" "}
                 上传。
               </p>
             ) : (
@@ -290,33 +299,40 @@ export default function ScenePage() {
             {models.length === 0 ? (
               <p className="text-sm text-slate-500">暂无可用图片模型。</p>
             ) : (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {models.map((m) => {
-                  const active = selectedModelSlug === m.slug;
-                  return (
-                    <button
-                      key={m.slug}
-                      onClick={() => setSelectedModelSlug(m.slug)}
-                      className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition-all ${
-                        active
-                          ? "border-[var(--vc-accent)] bg-[var(--vc-accent)]/10 text-white"
-                          : "border-[var(--vc-border)] text-slate-400 hover:border-white/20 hover:text-white"
-                      }`}
-                    >
-                      <span className="truncate">{m.name}</span>
-                      <span
-                        className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+              <>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {models.map((m) => {
+                    const active = selectedModelSlug === m.slug;
+                    return (
+                      <button
+                        key={m.slug}
+                        onClick={() => setSelectedModelSlug(m.slug)}
+                        className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition-all ${
                           active
-                            ? "bg-[var(--vc-accent)]/20 text-[var(--vc-accent)]"
-                            : "bg-white/5 text-slate-500"
+                            ? "border-[var(--vc-accent)] bg-[var(--vc-accent)]/10 text-white"
+                            : "border-[var(--vc-border)] text-slate-400 hover:border-white/20 hover:text-white"
                         }`}
                       >
-                        {m.creditsPerGen} 积分/张
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+                        <span className="truncate">{m.name}</span>
+                        <span
+                          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            active
+                              ? "bg-[var(--vc-accent)]/20 text-[var(--vc-accent)]"
+                              : "bg-white/5 text-slate-500"
+                          }`}
+                        >
+                          {m.creditsPerGen} 积分/张
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {selectedModelIsSlow && (
+                  <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                    GPT Image 2 质量更高但可能需要数分钟；生成期间请保持页面打开，不要重复点击提交。
+                  </p>
+                )}
+              </>
             )}
           </div>
 

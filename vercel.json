@@ -1,12 +1,16 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
+  "fluid": true,
   "installCommand": "npm install",
   "buildCommand": "npx tsx scripts/vercel-build.ts",
   "regions": ["sin1"],
   "functions": {
     "src/app/api/generate/route.ts": {
       "maxDuration": 300
+    },
+    "src/app/api/assets/scene/route.ts": {
+      "maxDuration": 800
     },
     "src/app/api/cron/scheduled/route.ts": {
       "maxDuration": 300

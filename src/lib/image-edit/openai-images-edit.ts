@@ -13,10 +13,12 @@
  */
 import type { Model } from "@/lib/db/schema";
 import { fetchWithRetry } from "@/lib/api/retry";
+import type { RetryConfig } from "@/lib/api/retry";
 import { fetchAssetBuffer } from "@/lib/storage/gateway";
 
 const DEFAULT_BASE_URL = "https://api.bltcy.ai";
 const DEFAULT_SIZE = "1024x1536"; // 2:3 portrait, closest to 9:16 in supported sizes
+const DEFAULT_TIMEOUT_MS = 780_000;
 
 function normalizeBaseUrl(baseUrl?: string | null) {
   return (baseUrl?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, "");
@@ -73,13 +75,8 @@ export async function openaiImagesEditRequest(params: {
   form.append("size", params.size ?? DEFAULT_SIZE);
 
   const baseUrl = normalizeBaseUrl(params.model.baseUrl);
-  // Per-image 90s budget. gpt-image-1/2 typically return in ~30-50s;
-  // occasionally a heavier prompt ("model" style with a person) pushes
-  // over 90s. We do ONE retry on abort/timeout — most such stalls are
-  // upstream hiccups that clear on the second try, and 2×90s=180s still
-  // leaves headroom inside the 300s scene-route budget.
-  const doFetch = () =>
-    fetchWithRetry(() =>
+  const response = await fetchWithRetry(
+    () =>
       fetch(`${baseUrl}/v1/images/edits`, {
         method: "POST",
         headers: {
@@ -87,25 +84,10 @@ export async function openaiImagesEditRequest(params: {
           Accept: "application/json",
         },
         body: form,
-        signal: AbortSignal.timeout(90_000),
+        signal: AbortSignal.timeout(resolveOpenAiImagesEditTimeoutMs(params.model)),
       }),
-    );
-
-  let response: Response;
-  try {
-    response = await doFetch();
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "";
-    const isAbort =
-      err instanceof Error &&
-      (err.name === "TimeoutError" ||
-        err.name === "AbortError" ||
-        msg.includes("aborted") ||
-        msg.includes("timeout"));
-    if (!isAbort) throw err;
-    // Retry once on abort — upstream hiccup usually clears fast.
-    response = await doFetch();
-  }
+    resolveOpenAiImagesEditRetryConfig(),
+  );
 
   const json = (await response.json()) as ImagesEditResponse;
 
@@ -134,4 +116,21 @@ export function isOpenAiImagesEditModel(
 ): boolean {
   const slug = model.slug?.toLowerCase() ?? "";
   return slug.startsWith("gpt-image") || slug.startsWith("dall-e");
+}
+
+export function resolveOpenAiImagesEditTimeoutMs(
+  model: Pick<Model, "slug">,
+): number {
+  const slug = model.slug?.toLowerCase() ?? "";
+  if (slug.startsWith("gpt-image")) return DEFAULT_TIMEOUT_MS;
+  return DEFAULT_TIMEOUT_MS;
+}
+
+export function shouldRetryOpenAiImagesEditError(error: unknown): boolean {
+  void error;
+  return false;
+}
+
+export function resolveOpenAiImagesEditRetryConfig(): RetryConfig {
+  return { maxAttempts: 1 };
 }
