@@ -14,7 +14,7 @@ import { MODEL_CAPABILITIES } from "@/lib/models/capabilities";
 import { uploadAsset } from "@/lib/storage/gateway";
 import { resolveImageBuffer } from "@/lib/image-edit/payload";
 
-export const maxDuration = 800;
+export const maxDuration = 300;
 
 const VALID_STYLES = new Set<SceneStyle>([
   "lifestyle",

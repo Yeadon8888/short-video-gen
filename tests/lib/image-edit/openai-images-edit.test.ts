@@ -6,8 +6,8 @@ import {
   shouldRetryOpenAiImagesEditError,
 } from "../../../src/lib/image-edit/openai-images-edit";
 
-test("gpt-image-2 waits near the fluid function budget instead of aborting at 90 seconds", () => {
-  assert.equal(resolveOpenAiImagesEditTimeoutMs({ slug: "gpt-image-2" }), 780_000);
+test("gpt-image-2 waits near the basic function budget instead of aborting at 90 seconds", () => {
+  assert.equal(resolveOpenAiImagesEditTimeoutMs({ slug: "gpt-image-2" }), 270_000);
 });
 
 test("aborted gpt-image requests are not retried because the provider may keep running", () => {

@@ -18,7 +18,7 @@ import { fetchAssetBuffer } from "@/lib/storage/gateway";
 
 const DEFAULT_BASE_URL = "https://api.bltcy.ai";
 const DEFAULT_SIZE = "1024x1536"; // 2:3 portrait, closest to 9:16 in supported sizes
-const DEFAULT_TIMEOUT_MS = 780_000;
+const DEFAULT_TIMEOUT_MS = 270_000;
 
 function normalizeBaseUrl(baseUrl?: string | null) {
   return (baseUrl?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, "");
