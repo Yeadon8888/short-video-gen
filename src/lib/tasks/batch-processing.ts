@@ -18,6 +18,7 @@ import {
   getMaxBatchSlotSubmissionsPerTick,
   resolveRemainingSubmissionCapacity,
 } from "@/lib/tasks/batch-queue";
+import { loadSystemPrompts } from "@/lib/system-prompts";
 
 export function resolveBatchTaskVideoCount(taskParams: TaskParamsSnapshot): number {
   return resolveBatchUnitsPerProduct(taskParams);
@@ -55,7 +56,10 @@ export async function processPendingBatchTasks(params: {
 
   await resetStaleAnalyzingTasks(group.id);
 
-  const customPrompts = await loadUserPrompts(group.userId);
+  const [customPrompts, systemPrompts] = await Promise.all([
+    loadUserPrompts(group.userId),
+    loadSystemPrompts(),
+  ]);
   const activeChildTasks = await db
     .select({ id: tasks.id })
     .from(tasks)
@@ -120,16 +124,22 @@ export async function processPendingBatchTasks(params: {
           type: "theme",
           theme: taskParams.batchTheme ?? claimedTask.inputText ?? "",
           imageBuffers: [imageAsset],
-          promptTemplate: customPrompts.theme_to_video,
+          promptTemplate:
+            customPrompts.theme_to_video?.trim() ||
+            systemPrompts.theme_to_video,
+          referencePromptTemplate: systemPrompts.gemini_reference_constraints,
           platform: taskParams.platform,
           outputLanguage: taskParams.outputLanguage,
         });
 
-        if (customPrompts.copy_generation) {
+        const copyPromptTemplate =
+          customPrompts.copy_generation?.trim() ||
+          systemPrompts.copy_generation?.trim();
+        if (copyPromptTemplate) {
           try {
             scriptResult.copy = await generateCopy(
               scriptResult.full_sora_prompt,
-              customPrompts.copy_generation,
+              copyPromptTemplate,
               taskParams.platform,
               taskParams.outputLanguage,
             );
@@ -141,7 +151,9 @@ export async function processPendingBatchTasks(params: {
         const soraPrompt = buildFinalVideoPrompt({
           scriptPrompt: scriptResult.full_sora_prompt,
           referenceImageCount: 1,
+          referencePromptTemplate: systemPrompts.final_video_reference_constraints,
           outputLanguage: taskParams.outputLanguage,
+          script: scriptResult,
         });
 
         const model = await getVideoModelById(claimedTask.modelId);

@@ -1,5 +1,6 @@
 import { MODEL_CAPABILITIES } from "@/lib/models/capabilities";
 import { getActiveModelByCapability } from "@/lib/models/repository";
+import { loadSystemPrompts } from "@/lib/system-prompts";
 import type { Model } from "@/lib/db/schema";
 import {
   buildImageDataUrl,
@@ -163,10 +164,10 @@ export async function editProductImageToPortraitWhiteBg(params: {
       capability: MODEL_CAPABILITIES.imageEdit,
     }));
 
+  const systemPrompts = await loadSystemPrompts();
   const imageUrl = await bltcyImageRequest({
     assetUrl: params.assetUrl,
-    prompt:
-      "请基于这张商品图做图片编辑，不改变商品本身的材质、颜色、结构与品牌信息。要求：1. 智能抠出主体商品；2. 生成 9:16 竖版构图；3. 纯白背景；4. 商品完整居中展示；5. 保留真实商品边缘与细节；6. 输出适合电商展示的干净白底图。",
+    prompt: systemPrompts.product_white_bg,
     model,
   });
 

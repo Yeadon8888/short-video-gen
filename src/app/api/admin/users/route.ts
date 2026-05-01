@@ -51,7 +51,7 @@ export async function PATCH(req: NextRequest) {
 
   const body = (await req.json()) as {
     userId: string;
-    role?: "admin" | "user";
+    role?: "admin" | "partner" | "user";
     status?: "active" | "suspended";
     name?: string;
   };
@@ -61,7 +61,12 @@ export async function PATCH(req: NextRequest) {
   }
 
   const updates: Record<string, unknown> = {};
-  if (body.role) updates.role = body.role;
+  if (body.role) {
+    if (!["admin", "partner", "user"].includes(body.role)) {
+      return NextResponse.json({ error: "Invalid role" }, { status: 400 });
+    }
+    updates.role = body.role;
+  }
   if (body.status) updates.status = body.status;
   if (body.name !== undefined) updates.name = body.name;
   updates.updatedAt = new Date();

@@ -9,6 +9,7 @@ import {
 } from "@/lib/payments/config";
 import { createAlipayPageUrl, queryAlipayTrade } from "@/lib/payments/alipay";
 import { createStripeCheckoutSession, persistStripeCustomerId } from "@/lib/payments/stripe";
+import { getPartnerIdForUser } from "@/lib/partners";
 
 export type PaymentProvider = "alipay" | "stripe";
 
@@ -75,6 +76,7 @@ async function createAlipayRechargeOrder(params: {
   }
 
   const outTradeNo = generateOutTradeNo();
+  const partnerId = await getPartnerIdForUser(params.userId);
   const subject = `${params.pkg.name} · ${params.pkg.credits} 积分`;
   const payment = createAlipayPageUrl({
     config,
@@ -98,6 +100,7 @@ async function createAlipayRechargeOrder(params: {
       amountFen: params.pkg.amountFen,
       credits: params.pkg.credits,
       paymentUrl: payment.url,
+      partnerId,
       expiredAt: new Date(Date.now() + 30 * 60 * 1000),
       updatedAt: new Date(),
     })
@@ -122,6 +125,7 @@ async function createStripeRechargeOrder(params: {
   }
 
   const outTradeNo = generateOutTradeNo();
+  const partnerId = await getPartnerIdForUser(params.userId);
   const subject = `${params.pkg.name} · ${params.pkg.credits} 积分`;
 
   const [existingUser] = await db
@@ -144,6 +148,7 @@ async function createStripeRechargeOrder(params: {
       amountFen: params.pkg.amountFen,
       credits: params.pkg.credits,
       paymentUrl: null,
+      partnerId,
       expiredAt: new Date(Date.now() + 30 * 60 * 1000),
       updatedAt: new Date(),
     })

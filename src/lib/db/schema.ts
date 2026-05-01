@@ -12,7 +12,8 @@ import {
 
 // ─── Enums ───
 
-export const userRoleEnum = pgEnum("user_role", ["admin", "user"]);
+export const userRoleEnum = pgEnum("user_role", ["admin", "partner", "user"]);
+export const partnerStatusEnum = pgEnum("partner_status", ["active", "disabled"]);
 export const userStatusEnum = pgEnum("user_status", ["active", "suspended"]);
 export const taskTypeEnum = pgEnum("task_type", ["theme", "remix", "url", "scene_gen", "analyze"]);
 export const taskStatusEnum = pgEnum("task_status", [
@@ -83,6 +84,39 @@ export const users = pgTable("users", {
   stripeCustomerId: varchar("stripe_customer_id", { length: 64 }).unique(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ─── Partner Program (一级伙伴/代理商) ───
+
+export const partnerProfiles = pgTable("partner_profiles", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).unique().notNull(),
+  code: varchar("code", { length: 64 }).unique().notNull(),
+  displayName: varchar("display_name", { length: 100 }),
+  status: partnerStatusEnum("status").default("active").notNull(),
+  commissionRateBps: integer("commission_rate_bps").default(0).notNull(),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const partnerAttributions = pgTable("partner_attributions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).unique().notNull(),
+  partnerId: uuid("partner_id").references(() => partnerProfiles.id, { onDelete: "restrict" }).notNull(),
+  referralCode: varchar("referral_code", { length: 64 }).notNull(),
+  firstTouchAt: timestamp("first_touch_at", { withTimezone: true }).defaultNow().notNull(),
+  registeredAt: timestamp("registered_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const partnerCreditTransfers = pgTable("partner_credit_transfers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  partnerId: uuid("partner_id").references(() => partnerProfiles.id, { onDelete: "restrict" }).notNull(),
+  fromUserId: uuid("from_user_id").references(() => users.id, { onDelete: "restrict" }).notNull(),
+  toUserId: uuid("to_user_id").references(() => users.id, { onDelete: "restrict" }).notNull(),
+  amount: integer("amount").notNull(),
+  reason: text("reason"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 // ─── Models (可用视频模型配置) ───
@@ -276,6 +310,8 @@ export const paymentOrders = pgTable("payment_orders", {
   stripeSessionId: varchar("stripe_session_id", { length: 128 }),
   /** Stripe PaymentIntent ID (pi_...), populated after payment */
   stripePaymentIntentId: varchar("stripe_payment_intent_id", { length: 128 }),
+  /** Partner attribution at order creation time, used for reseller reports. */
+  partnerId: uuid("partner_id").references(() => partnerProfiles.id, { onDelete: "set null" }),
   paidAt: timestamp("paid_at", { withTimezone: true }),
   expiredAt: timestamp("expired_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -371,6 +407,10 @@ export const announcements = pgTable("announcements", {
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
+export type PartnerProfile = typeof partnerProfiles.$inferSelect;
+export type NewPartnerProfile = typeof partnerProfiles.$inferInsert;
+export type PartnerAttribution = typeof partnerAttributions.$inferSelect;
+export type PartnerCreditTransfer = typeof partnerCreditTransfers.$inferSelect;
 export type Model = typeof models.$inferSelect;
 export type NewModel = typeof models.$inferInsert;
 export type TaskGroup = typeof taskGroups.$inferSelect;

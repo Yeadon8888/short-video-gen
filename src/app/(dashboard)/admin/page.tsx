@@ -8,7 +8,7 @@ interface User {
   id: string;
   email: string;
   name: string | null;
-  role: "admin" | "user";
+  role: "admin" | "partner" | "user";
   status: "active" | "suspended";
   credits: number;
   createdAt: string;
@@ -124,7 +124,9 @@ export default function AdminUsersPage() {
                       className={`rounded-full px-2 py-0.5 text-xs ${
                         u.role === "admin"
                           ? "bg-[var(--vc-accent)]/20 text-[var(--vc-accent)]"
-                          : "bg-zinc-700 text-zinc-300"
+                          : u.role === "partner"
+                            ? "bg-blue-500/20 text-blue-300"
+                            : "bg-zinc-700 text-zinc-300"
                       }`}
                     >
                       {u.role}

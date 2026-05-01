@@ -2,13 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Users, Coins, Settings2, ListTodo, Megaphone, Wallet, Gift } from "lucide-react";
+import { Users, Coins, Settings2, ListTodo, Megaphone, Wallet, Gift, Handshake, MessageSquareText } from "lucide-react";
 
 const tabs = [
   { href: "/admin", label: "用户管理", icon: Users },
   { href: "/admin/credits", label: "积分管理", icon: Coins },
+  { href: "/admin/partners", label: "伙伴管理", icon: Handshake },
   { href: "/admin/onboarding", label: "注册赠送", icon: Gift },
   { href: "/admin/models", label: "模型配置", icon: Settings2 },
+  { href: "/admin/system-prompts", label: "系统 Prompt", icon: MessageSquareText },
   { href: "/admin/payments", label: "支付配置", icon: Wallet },
   { href: "/admin/tasks", label: "任务监控", icon: ListTodo },
   { href: "/admin/announcements", label: "公告管理", icon: Megaphone },

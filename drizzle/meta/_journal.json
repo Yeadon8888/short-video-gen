@@ -99,6 +99,13 @@
       "when": 1776758606000,
       "tag": "0013_enable_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1777612800000,
+      "tag": "0014_partner_program",
+      "breakpoints": true
     }
   ]
 }

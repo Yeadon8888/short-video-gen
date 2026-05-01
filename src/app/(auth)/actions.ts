@@ -1,10 +1,14 @@
 "use server";
 
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { createAppUserForAuthUser } from "@/lib/onboarding";
+import {
+  attachPartnerAttributionIfMissing,
+  createAppUserForAuthUser,
+} from "@/lib/onboarding";
+import { PARTNER_REF_COOKIE } from "@/lib/partners";
 
 export async function login(formData: FormData) {
   const supabase = await createClient();
@@ -17,6 +21,29 @@ export async function login(formData: FormData) {
   const { error } = await supabase.auth.signInWithPassword(data);
   if (error) {
     return { error: error.message };
+  }
+
+  const cookieStore = await cookies();
+  const referralCode = cookieStore.get(PARTNER_REF_COOKIE)?.value ?? null;
+  if (referralCode) {
+    const { data: authData } = await supabase.auth.getUser();
+    const authUser = authData.user;
+    if (authUser?.email) {
+      const appUser = await createAppUserForAuthUser({
+        authId: authUser.id,
+        email: authUser.email,
+        name:
+          authUser.user_metadata?.full_name ??
+          authUser.user_metadata?.name ??
+          authUser.email.split("@")[0],
+        referralCode,
+      });
+      await attachPartnerAttributionIfMissing({
+        userId: appUser.id,
+        referralCode,
+      });
+    }
+    cookieStore.delete(PARTNER_REF_COOKIE);
   }
 
   revalidatePath("/", "layout");
@@ -42,11 +69,15 @@ export async function signup(formData: FormData) {
   // Create app user record
   if (authData.user) {
     try {
+      const cookieStore = await cookies();
+      const referralCode = cookieStore.get(PARTNER_REF_COOKIE)?.value ?? null;
       await createAppUserForAuthUser({
         authId: authData.user.id,
         email,
         name,
+        referralCode,
       });
+      if (referralCode) cookieStore.delete(PARTNER_REF_COOKIE);
     } catch (dbError) {
       console.error("[signup] DB error:", dbError);
       return { error: "账号创建失败，请稍后再试" };
@@ -72,11 +103,14 @@ export async function signOut() {
 export async function signInWithGoogle() {
   const supabase = await createClient();
   const origin = (await headers()).get("origin") ?? "https://video.yeadon.top";
+  const partnerRef = (await cookies()).get(PARTNER_REF_COOKIE)?.value;
+  const callbackUrl = new URL("/auth/callback", origin);
+  if (partnerRef) callbackUrl.searchParams.set("ref", partnerRef);
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: {
-      redirectTo: `${origin}/auth/callback`,
+      redirectTo: callbackUrl.toString(),
     },
   });
 

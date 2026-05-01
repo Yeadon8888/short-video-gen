@@ -8,11 +8,11 @@ import {
   History,
   ImageIcon,
   Images,
-  UserCircle,
   Settings,
   Shield,
   Coins,
   ScanSearch,
+  Handshake,
   X,
 } from "lucide-react";
 import type { User } from "@/lib/db/schema";
@@ -38,11 +38,16 @@ const adminLinks = [
   { href: "/admin", label: "管理后台", icon: Shield },
 ];
 
+const partnerLinks = [
+  { href: "/partner", label: "伙伴中心", icon: Handshake },
+];
+
 export function Sidebar({ user, mobileOpen, onMobileClose }: SidebarProps) {
   const pathname = usePathname();
 
   const links = [
     ...userLinks,
+    ...(user.role === "partner" || user.role === "admin" ? partnerLinks : []),
     ...(user.role === "admin" ? adminLinks : []),
   ];
 

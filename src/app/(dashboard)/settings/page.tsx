@@ -35,7 +35,11 @@ export default async function SettingsPage() {
           <div>
             <span className="text-[var(--vc-text-muted)]">角色</span>
             <p className="text-white">
-              {user.role === "admin" ? "管理员" : "普通用户"}
+              {user.role === "admin"
+                ? "管理员"
+                : user.role === "partner"
+                  ? "伙伴"
+                  : "普通用户"}
             </p>
           </div>
           <div>

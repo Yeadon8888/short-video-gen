@@ -50,6 +50,10 @@ Each major domain has its own `CLAUDE.md` with detailed architecture notes:
 
 - **`generate/`** — Orchestrates task creation: validates input, deducts credits, inserts task rows, and enqueues for processing.
 
+- **`partners.ts`** — Partner / referral program. `/r/[code]` sets the `vc_partner_ref` cookie (30-day TTL) and redirects to `/`; on signup, `partner_attributions` records first-touch attribution (one partner per user, immutable). `payment_orders.partner_id` is stamped at order creation for commission attribution; `partner_credit_transfers` records partner→user credit gifts. The `partner` value on `user_role` enum gates `/partner` dashboard access; admins manage profiles + commission rate (bps) at `/admin/partners`. Codes are normalized to `[a-z0-9_-]{3,64}` — never trust raw input.
+
+- **`system-prompts.ts`** — Prompts for AI flows (theme→video, remix, copy generation, scene generation by type/locale) live in `system_config` under key `prompts.system`, edited at `/admin/system-prompts`. Code paths read prompts via this module rather than hardcoding strings, so prompt tuning ships without a deploy. Adding a new prompt key requires updating the `SystemPromptKey` union *and* the definitions list.
+
 - **`db/schema.ts`** — Single source of truth for all tables and enums. Key tables: `users`, `models`, `tasks`, `taskGroups`, `taskSlots`, `taskItems`, `creditTxns`, `paymentOrders`, `stripeEvents`, `userAssets`, `assetTransformJobs`, `galleryItems`.
 
 ### Task state machine

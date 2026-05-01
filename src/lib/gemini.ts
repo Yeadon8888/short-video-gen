@@ -10,6 +10,7 @@ import type { ScriptResult } from "@/lib/video/types";
 import type { OutputLanguage } from "@/lib/video/languages";
 import { getLanguage } from "@/lib/video/languages";
 import { buildScriptInstruction } from "@/lib/video/prompt";
+import { applyScriptPromptPlaceholders } from "@/lib/system-prompts";
 
 const DEFAULT_GEMINI_MODEL = "gemini-3.1-pro-preview";
 const DEFAULT_BASE_URL = "https://yunwu.ai";
@@ -215,6 +216,7 @@ export async function generateScript(params: {
   creativeBrief?: string;
   imageBuffers?: { buffer: ArrayBuffer; mimeType: string }[];
   promptTemplate?: string;
+  referencePromptTemplate?: string;
   platform?: "douyin" | "tiktok";
   outputLanguage?: OutputLanguage;
 }): Promise<ScriptResult> {
@@ -227,6 +229,7 @@ export async function generateScript(params: {
     creativeBrief,
     imageBuffers,
     promptTemplate,
+    referencePromptTemplate,
     platform,
     outputLanguage,
   } = params;
@@ -241,10 +244,12 @@ export async function generateScript(params: {
   // Build instruction
   let instruction: string;
   if (promptTemplate) {
-    instruction = promptTemplate
-      .replace(/\{\{THEME\}\}/g, theme ?? "")
-      .replace(/\{\{MODIFICATION_PROMPT\}\}/g, modification ?? creativeBrief ?? "")
-      .replace(/\{\{CREATIVE_BRIEF\}\}/g, creativeBrief ?? modification ?? "");
+    instruction = applyScriptPromptPlaceholders({
+      template: promptTemplate,
+      theme,
+      modification,
+      creativeBrief,
+    });
     if (!instruction.includes('"full_sora_prompt"')) {
       instruction += JSON_OUTPUT_SUFFIX;
     }
@@ -259,6 +264,7 @@ export async function generateScript(params: {
     baseInstruction: instruction,
     referenceImageCount: imageBuffers?.length ?? 0,
     creativeBrief,
+    referencePromptTemplate,
   });
 
   // Build content parts

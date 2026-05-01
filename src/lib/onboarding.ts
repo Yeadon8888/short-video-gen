@@ -1,6 +1,13 @@
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { creditTxns, systemConfig, users } from "@/lib/db/schema";
+import {
+  creditTxns,
+  partnerAttributions,
+  partnerProfiles,
+  systemConfig,
+  users,
+} from "@/lib/db/schema";
+import { normalizePartnerCode } from "@/lib/partners";
 
 export const NEW_USER_FREE_CREDITS_CONFIG_KEY = "onboarding.new_user_free_credits";
 export const DEFAULT_NEW_USER_FREE_CREDITS = 10;
@@ -72,6 +79,7 @@ export async function createAppUserForAuthUser(params: {
   authId: string;
   email: string;
   name: string | null;
+  referralCode?: string | null;
 }) {
   return db.transaction(async (tx) => {
     const [existing] = await tx
@@ -116,7 +124,67 @@ export async function createAppUserForAuthUser(params: {
       });
     }
 
+    const referralCode = params.referralCode ? normalizePartnerCode(params.referralCode) : "";
+    if (referralCode) {
+      const [partner] = await tx
+        .select()
+        .from(partnerProfiles)
+        .where(eq(partnerProfiles.code, referralCode))
+        .limit(1);
+
+      if (partner && partner.status === "active" && partner.userId !== created.id) {
+        await tx
+          .insert(partnerAttributions)
+          .values({
+            userId: created.id,
+            partnerId: partner.id,
+            referralCode: partner.code,
+          })
+          .onConflictDoNothing({ target: partnerAttributions.userId });
+      }
+    }
+
     return created;
+  });
+}
+
+export async function attachPartnerAttributionIfMissing(params: {
+  userId: string;
+  referralCode?: string | null;
+}) {
+  const referralCode = params.referralCode ? normalizePartnerCode(params.referralCode) : "";
+  if (!referralCode) return null;
+
+  return db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select({ id: partnerAttributions.id })
+      .from(partnerAttributions)
+      .where(eq(partnerAttributions.userId, params.userId))
+      .limit(1);
+
+    if (existing) return null;
+
+    const [partner] = await tx
+      .select()
+      .from(partnerProfiles)
+      .where(eq(partnerProfiles.code, referralCode))
+      .limit(1);
+
+    if (!partner || partner.status !== "active" || partner.userId === params.userId) {
+      return null;
+    }
+
+    const [created] = await tx
+      .insert(partnerAttributions)
+      .values({
+        userId: params.userId,
+        partnerId: partner.id,
+        referralCode: partner.code,
+      })
+      .onConflictDoNothing({ target: partnerAttributions.userId })
+      .returning();
+
+    return created ?? null;
   });
 }
 

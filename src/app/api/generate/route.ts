@@ -30,6 +30,7 @@ import {
 import { computeDeliveryDeadline } from "@/lib/tasks/retry-policy";
 import { resolveStandaloneSubmissionPlan } from "@/lib/tasks/standalone-fulfillment";
 import type { OutputLanguage } from "@/lib/video/types";
+import { loadSystemPrompts } from "@/lib/system-prompts";
 
 export const maxDuration = 300; // Vercel max
 const MAX_REFERENCE_IMAGES = 4;
@@ -219,17 +220,26 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        const customPrompts = await loadUserPrompts(user.id);
+        const [customPrompts, systemPrompts] = await Promise.all([
+          loadUserPrompts(user.id),
+          loadSystemPrompts(),
+        ]);
         const isVideoMode = type === "url" || type === "video_key";
-        let promptTemplate: string | undefined;
+        let promptTemplate: string;
+        let customPromptUsed = false;
         if (isVideoMode) {
-          promptTemplate = modification
-            ? customPrompts.video_remix_with_modification
-            : customPrompts.video_remix_base;
+          const key = effectiveCreativeBrief
+            ? "video_remix_with_modification"
+            : "video_remix_base";
+          promptTemplate = customPrompts[key]?.trim() || systemPrompts[key];
+          customPromptUsed = Boolean(customPrompts[key]?.trim());
         } else {
-          promptTemplate = customPrompts.theme_to_video;
+          promptTemplate =
+            customPrompts.theme_to_video?.trim() ||
+            systemPrompts.theme_to_video;
+          customPromptUsed = Boolean(customPrompts.theme_to_video?.trim());
         }
-        if (promptTemplate) log("使用自定义 Prompt 模板");
+        log(customPromptUsed ? "使用用户自定义 Prompt 模板" : "使用后台系统 Prompt 模板");
 
         const scriptResult = await generateScript({
           type: isVideoMode ? "video" : "theme",
@@ -240,6 +250,7 @@ export async function POST(req: NextRequest) {
           creativeBrief: type === "theme" ? effectiveCreativeBrief : undefined,
           imageBuffers,
           promptTemplate,
+          referencePromptTemplate: systemPrompts.gemini_reference_constraints,
           platform: params.platform,
           outputLanguage: resolvedOutputLanguage,
         });
@@ -247,12 +258,19 @@ export async function POST(req: NextRequest) {
         log(`Gemini 生成完成，共 ${scriptResult.shots?.length ?? 0} 个镜头`);
 
         // Custom copy regeneration
-        if (customPrompts.copy_generation) {
+        const copyPromptTemplate =
+          customPrompts.copy_generation?.trim() ||
+          systemPrompts.copy_generation?.trim();
+        if (copyPromptTemplate) {
           try {
-            log("使用自定义文案 Prompt 重新生成文案...");
+            log(
+              customPrompts.copy_generation?.trim()
+                ? "使用用户自定义文案 Prompt 重新生成文案..."
+                : "使用后台系统文案 Prompt 重新生成文案...",
+            );
             const copy = await generateCopy(
               scriptResult.full_sora_prompt,
-              customPrompts.copy_generation,
+              copyPromptTemplate,
               params.platform,
               resolvedOutputLanguage,
             );
@@ -266,7 +284,9 @@ export async function POST(req: NextRequest) {
         const soraPrompt = buildFinalVideoPrompt({
           scriptPrompt: scriptResult.full_sora_prompt,
           referenceImageCount: referenceImageUrls.length,
+          referencePromptTemplate: systemPrompts.final_video_reference_constraints,
           outputLanguage: resolvedOutputLanguage,
+          script: scriptResult,
         });
 
         send({

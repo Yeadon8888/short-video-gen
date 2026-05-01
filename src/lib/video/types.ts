@@ -47,6 +47,15 @@ export interface Shot {
   sora_prompt: string;
   duration_s: number;
   camera: "close-up" | "wide" | "medium" | "overhead";
+  voiceover?: string;
+  on_screen_text?: string[];
+}
+
+export interface OnScreenTextItem {
+  text: string;
+  shot_id?: number;
+  position?: string;
+  locale?: string;
 }
 
 export interface ScriptResult {
@@ -64,6 +73,29 @@ export interface ScriptResult {
     spoken?: string;
     content?: string;
   };
+  /**
+   * Hard requirements extracted from user input. Pass through to the final
+   * video prompt verbatim — do not paraphrase. Surfaced as separate sections
+   * in `buildFinalVideoPrompt` so providers see them as constraints, not
+   * descriptions Gemini already absorbed.
+   */
+  on_screen_text?: Array<OnScreenTextItem | string>;
+  pacing?: string;
+  negative?: string[];
+}
+
+/**
+ * Rendering-stage invariants — user requirements that must reach the video
+ * model regardless of how the script-writer (Gemini) phrased them. Each
+ * non-empty field becomes its own section in the final provider prompt.
+ */
+export interface RenderingInvariants {
+  languageLabel?: string;
+  reference?: { count: number; templateOverride?: string };
+  onScreenText?: OnScreenTextItem[];
+  pacing?: string;
+  negative?: string[];
+  voiceovers?: Array<{ shotId?: number; text: string }>;
 }
 
 // See src/lib/video/languages.ts for the full list + how to add new ones.

@@ -13,6 +13,10 @@ import {
   isOpenAiImagesEditModel,
   openaiImagesEditRequest,
 } from "@/lib/image-edit/openai-images-edit";
+import {
+  loadSystemPrompts,
+  type SystemPromptKey,
+} from "@/lib/system-prompts";
 
 export type SceneStyle =
   | "lifestyle"
@@ -32,36 +36,6 @@ export type SceneRegion =
   | "middle_east";
 
 export type ScenePromptLanguage = "zh" | "en";
-
-const SCENE_PROMPTS_ZH: Record<SceneStyle, string> = {
-  lifestyle:
-    "请基于这张商品图生成一张生活场景展示图。要求：1. 将商品自然地融入日常使用场景中；2. 背景要有生活氛围感（如桌面、客厅、厨房等）；3. 光影自然柔和；4. 保留商品的所有细节、颜色和品牌标识；5. 构图美观，适合电商详情页展示。",
-  model:
-    "请基于这张商品图生成一张模特使用/展示图。要求：1. 添加一位合适的模特在自然场景中使用或展示该商品；2. 模特姿态自然得体；3. 画面有高端广告感；4. 完整保留商品的材质、颜色和品牌信息；5. 适合社交媒体种草推广。",
-  detail:
-    "请基于这张商品图生成一张细节特写图。要求：1. 用微距视角突出商品的质感和工艺细节；2. 浅景深虚化背景；3. 光线突出产品表面纹理；4. 保留所有品牌标识和设计元素；5. 适合电商详情页细节展示。",
-  flatlay:
-    "请基于这张商品图生成一张平铺摆拍图。要求：1. 俯拍视角，将商品与搭配的配饰或场景元素一起平铺展示；2. 背景用浅色或大理石纹理；3. 整体构图干净有序；4. 完整保留商品外观和品牌信息；5. 适合小红书种草图。",
-  outdoor:
-    "请基于这张商品图生成一张户外场景图。要求：1. 将商品放置在自然光线充足的户外环境中；2. 背景可以是公园、街道、咖啡馆等；3. 画面通透明亮；4. 保留商品所有细节和品牌信息；5. 适合 TikTok/抖音带货视频封面。",
-  studio:
-    "请基于这张商品图生成一张专业棚拍风格图。要求：1. 使用有渐变色或纯色的专业摄影背景；2. 三点布光突出产品立体感；3. 画面高级精致；4. 完整保留商品材质、颜色和品牌标识；5. 适合电商主图展示。",
-};
-
-const SCENE_PROMPTS_EN: Record<SceneStyle, string> = {
-  lifestyle:
-    "Using this product image, generate a lifestyle scene. Requirements: 1) Place the product naturally into an everyday-use context; 2) Give the background a lived-in feel (desk, living room, kitchen, etc.); 3) Soft, natural lighting; 4) Preserve every detail, color, and brand mark of the product; 5) Clean composition suitable for an e-commerce product page.",
-  model:
-    "Using this product image, generate a photo of a model using or showcasing the product. Requirements: 1) Add a suitable human model using or presenting the product in a natural setting; 2) Natural, confident pose; 3) Premium advertising feel; 4) Preserve the product's materials, colors, and branding exactly; 5) Suitable for social-media product seeding.",
-  detail:
-    "Using this product image, generate a close-up detail shot. Requirements: 1) Macro perspective emphasizing texture and craftsmanship; 2) Shallow depth of field blurring the background; 3) Lighting that reveals surface texture; 4) Preserve all brand marks and design elements; 5) Suitable for the details section of a product page.",
-  flatlay:
-    "Using this product image, generate a flat-lay composition. Requirements: 1) Top-down shot placing the product alongside complementary accessories or props; 2) Light-colored or marble-textured background; 3) Clean, orderly composition; 4) Preserve product appearance and branding; 5) Suitable for lifestyle-feed / Xiaohongshu posts.",
-  outdoor:
-    "Using this product image, generate an outdoor scene. Requirements: 1) Place the product in a naturally lit outdoor environment (park, street, café, etc.); 2) Bright, airy atmosphere; 3) Preserve every product detail and brand mark; 4) Suitable as a thumbnail for TikTok / short-video product drops.",
-  studio:
-    "Using this product image, generate a professional studio-style photo. Requirements: 1) Gradient or solid professional photo backdrop; 2) Three-point lighting accentuating the product's form; 3) Premium, polished feel; 4) Preserve materials, colors, and branding; 5) Suitable for a primary product listing image.",
-};
 
 const REGION_PHRASE_ZH: Record<Exclude<SceneRegion, "auto">, string> = {
   western: "欧美（北美/欧洲）人种外貌",
@@ -88,18 +62,21 @@ const PEOPLE_STYLES: ReadonlySet<SceneStyle> = new Set([
   "outdoor",
 ]);
 
+function getScenePromptKey(
+  style: SceneStyle,
+  language: ScenePromptLanguage,
+): SystemPromptKey {
+  return `scene_${style}_${language}` as SystemPromptKey;
+}
+
 function buildScenePrompt(params: {
   style: SceneStyle;
   language: ScenePromptLanguage;
   region: SceneRegion;
+  basePrompt: string;
   customPrompt?: string;
 }): string {
-  const base =
-    params.language === "en"
-      ? SCENE_PROMPTS_EN[params.style]
-      : SCENE_PROMPTS_ZH[params.style];
-
-  const parts: string[] = [base];
+  const parts: string[] = [params.basePrompt.trim()];
 
   if (params.region !== "auto" && PEOPLE_STYLES.has(params.style)) {
     if (params.language === "en") {
@@ -147,10 +124,13 @@ export async function generateProductSceneImage(params: {
       capability: MODEL_CAPABILITIES.imageEdit,
     }));
 
+  const language = params.language ?? "zh";
+  const systemPrompts = await loadSystemPrompts();
   const prompt = buildScenePrompt({
     style: params.style,
-    language: params.language ?? "zh",
+    language,
     region: params.region ?? "auto",
+    basePrompt: systemPrompts[getScenePromptKey(params.style, language)],
     customPrompt: params.customPrompt,
   });
 
