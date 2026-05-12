@@ -24,6 +24,7 @@ export function classifyVideoProviderFailure(failReason: string): {
     msg.includes("prominent_people") ||
     msg.includes("content policy") ||
     msg.includes("safety") ||
+    msg.includes("unsafe") ||
     msg.includes("sensitive") ||
     msg.includes("sensitive prompt") ||
     msg.includes("sensitive word") ||

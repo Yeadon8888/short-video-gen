@@ -112,6 +112,21 @@ test("mergeVideoParamsWithModelDefaults keeps provider-specific params for downs
 
 test("resolveVideoProvider selects adapters by model provider", () => {
   assert.equal(resolveVideoProvider("plato").id, "plato");
+  assert.equal(resolveVideoProvider("nfvid").id, "nfvid");
+});
+
+test("getProviderCapabilities supports nfvid Sora 2 configured durations", () => {
+  const capabilities = getProviderCapabilities({
+    provider: "nfvid",
+    slug: "sora2-pro-12s-9x16",
+    defaultParams: {
+      duration: 12,
+      allowedDurations: [12],
+    },
+  });
+
+  assert.deepEqual(capabilities.allowedDurations, [12]);
+  assert.equal(capabilities.defaultDuration, 12);
 });
 
 test("resolveVideoProvider rejects unsupported providers", () => {

@@ -1,0 +1,224 @@
+import type {
+  VideoModelRecord,
+  VideoProviderAdapter,
+} from "@/lib/video/service";
+import type { TaskStatusResult } from "@/lib/video/types";
+import { delayStaggeredSubmission } from "@/lib/tasks/batch-queue";
+import { uploadSharedVideo } from "@/lib/storage/gateway";
+import {
+  extractNfvidFailReason,
+  extractNfvidStatus,
+  extractNfvidTaskId,
+  extractNfvidVideoUrl,
+  inferNfvidCapabilities,
+  NFVID_ACTIVE_STATES,
+  NFVID_DEFAULT_BASE_URL,
+  NFVID_FAILURE_STATES,
+  NFVID_SUCCESS_STATES,
+  NFVID_VIDEOS_ENDPOINT,
+  normalizeNfvidBaseUrl,
+  normalizeNfvidProgress,
+  type NfvidCreateResponse,
+  type NfvidStatusResponse,
+} from "./nfvid-utils";
+import {
+  classifyVideoProviderFailure,
+  extractProviderErrorMessage,
+  isRetryableOverload,
+} from "./shared";
+
+function getBaseUrl(model: VideoModelRecord): string {
+  return normalizeNfvidBaseUrl(
+    model.baseUrl ||
+    process.env.NFVID_BASE_URL ||
+    process.env.VIDEO_BASE_URL ||
+    NFVID_DEFAULT_BASE_URL,
+  );
+}
+
+function getApiKey(model: VideoModelRecord): string {
+  return (
+    model.apiKey ||
+    process.env.NFVID_API_KEY ||
+    process.env.VIDEO_API_KEY ||
+    ""
+  ).trim();
+}
+
+async function apiRequest<T>(params: {
+  model: VideoModelRecord;
+  method: "GET" | "POST";
+  path: string;
+  body?: unknown;
+  timeoutMs?: number;
+}): Promise<T> {
+  const apiKey = getApiKey(params.model);
+  if (!apiKey) {
+    throw new Error("NFVID_API_KEY is not set");
+  }
+
+  const url = `${getBaseUrl(params.model)}${params.path}`;
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        method: params.method,
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: params.body ? JSON.stringify(params.body) : undefined,
+        signal: AbortSignal.timeout(params.timeoutMs ?? 120_000),
+      });
+
+      const text = await response.text();
+      let payload: unknown = {};
+      if (text) {
+        try {
+          payload = JSON.parse(text);
+        } catch {
+          payload = { raw: text.slice(0, 500) };
+        }
+      }
+
+      if (!response.ok) {
+        const message = extractProviderErrorMessage(payload);
+        if (attempt < 2 && isRetryableOverload(response.status, message)) {
+          await new Promise((resolve) => setTimeout(resolve, 15_000 * (attempt + 1)));
+          continue;
+        }
+        throw new Error(`HTTP ${response.status}: ${message}`);
+      }
+
+      return payload as T;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 3_000 * (attempt + 1)));
+        continue;
+      }
+    }
+  }
+
+  throw lastError ?? new Error("NFVid video provider request failed");
+}
+
+async function rehostTaskContent(params: {
+  model: VideoModelRecord;
+  taskId: string;
+}): Promise<string | undefined> {
+  const apiKey = getApiKey(params.model);
+  const url = `${getBaseUrl(params.model)}${NFVID_VIDEOS_ENDPOINT}/${encodeURIComponent(params.taskId)}/content`;
+
+  try {
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(180_000),
+    });
+    if (!response.ok) return undefined;
+
+    const buffer = await response.arrayBuffer();
+    const stored = await uploadSharedVideo({
+      bucket: "nfvid",
+      filename: `${params.taskId}.mp4`,
+      data: buffer,
+      contentType: response.headers.get("content-type") ?? "video/mp4",
+    });
+    return stored.url;
+  } catch {
+    return undefined;
+  }
+}
+
+export const nfvidProvider: VideoProviderAdapter = {
+  id: "nfvid",
+
+  getCapabilities(model) {
+    return inferNfvidCapabilities(model);
+  },
+
+  async createTasks({ model, params }) {
+    const providerOptions = params.providerOptions ?? {};
+    const group = typeof providerOptions.group === "string" ? providerOptions.group : "vip";
+    const stream = typeof providerOptions.stream === "boolean" ? providerOptions.stream : false;
+    const taskIds: string[] = [];
+
+    for (let index = 0; index < params.count; index += 1) {
+      await delayStaggeredSubmission(index);
+      const imageUrl = params.imageUrls?.[index] ?? params.imageUrls?.[0];
+      const content: unknown[] = [{ type: "text", text: params.prompt }];
+      if (imageUrl) {
+        content.push({ type: "image_url", image_url: { url: imageUrl } });
+      }
+
+      const payload = {
+        ...providerOptions,
+        model: model.slug,
+        group,
+        stream,
+        prompt: params.prompt,
+        messages: [{ role: "user", content }],
+      };
+
+      const result = await apiRequest<NfvidCreateResponse>({
+        model,
+        method: "POST",
+        path: NFVID_VIDEOS_ENDPOINT,
+        body: payload,
+      });
+      const taskId = extractNfvidTaskId(result);
+      if (!taskId) {
+        throw new Error(`NFVid task creation failed: ${JSON.stringify(result).slice(0, 200)}`);
+      }
+      taskIds.push(taskId);
+    }
+
+    return { providerTaskIds: taskIds };
+  },
+
+  async queryTaskStatus({ model, taskId }): Promise<TaskStatusResult> {
+    const result = await apiRequest<NfvidStatusResponse>({
+      model,
+      method: "GET",
+      path: `${NFVID_VIDEOS_ENDPOINT}/${encodeURIComponent(taskId)}`,
+      timeoutMs: 60_000,
+    });
+
+    const status = extractNfvidStatus(result);
+    const progress = normalizeNfvidProgress(result.progress ?? result.data?.progress);
+
+    if (NFVID_SUCCESS_STATES.has(status)) {
+      const directUrl = extractNfvidVideoUrl(result);
+      const rehostedUrl = await rehostTaskContent({ model, taskId });
+      return {
+        taskId,
+        status: "SUCCESS",
+        progress: "100%",
+        url: rehostedUrl ?? directUrl ?? `${getBaseUrl(model)}${NFVID_VIDEOS_ENDPOINT}/${encodeURIComponent(taskId)}/content`,
+      };
+    }
+
+    if (NFVID_FAILURE_STATES.has(status)) {
+      const failReason = extractNfvidFailReason(result);
+      const { retryable, terminalClass } = classifyVideoProviderFailure(failReason);
+      return {
+        taskId,
+        status: "FAILED",
+        progress,
+        failReason,
+        retryable,
+        terminalClass,
+      };
+    }
+
+    if (NFVID_ACTIVE_STATES.has(status)) {
+      return { taskId, status, progress };
+    }
+
+    return { taskId, status, progress };
+  },
+};
+
+export { normalizeNfvidBaseUrl };

@@ -8,6 +8,7 @@ import { platoProvider } from "./providers/plato";
 import { yunwuProvider } from "./providers/yunwu";
 import { dashscopeProvider } from "./providers/dashscope";
 import { grok2apiProvider } from "./providers/grok2api";
+import { nfvidProvider } from "./providers/nfvid";
 import { prepareImagesForProvider } from "./image-prep";
 
 export interface VideoProviderCapabilities {
@@ -93,10 +94,11 @@ const PROVIDERS: Record<string, VideoProviderAdapter> = {
   yunwu: yunwuProvider,
   dashscope: dashscopeProvider,
   grok2api: grok2apiProvider,
+  nfvid: nfvidProvider,
 };
 
 function isDuration(value: unknown): value is VideoDuration {
-  return value === 4 || value === 5 || value === 6 || value === 8 || value === 10 || value === 15;
+  return value === 4 || value === 5 || value === 6 || value === 8 || value === 10 || value === 12 || value === 15;
 }
 
 function isOrientation(value: unknown): value is "portrait" | "landscape" {
