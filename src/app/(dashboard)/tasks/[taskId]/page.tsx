@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull, lt, sql } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { taskItems, taskSlots, tasks } from "@/lib/db/schema";
@@ -21,6 +21,7 @@ import {
   extractHashtags,
   getTaskSourceModeLabel,
 } from "@/lib/tasks/presentation";
+import { estimateQueueWaitMinutes } from "@/lib/video/providers/grok-pool-shared";
 
 function formatShanghaiTime(value: string | Date | null | undefined): string | null {
   if (!value) return null;
@@ -67,6 +68,25 @@ export default async function TaskDetailPage({
     .limit(1);
 
   if (!task) notFound();
+
+  // For ASAP-queued scheduled tasks (status=scheduled + scheduledAt=null), compute
+  // queue position: count earlier-created queued tasks for the SAME model. Each
+  // model's queue is independent (plato vs grok2api have different capacity).
+  let queueAhead = 0;
+  if (task.status === "scheduled" && task.scheduledAt === null && task.modelId) {
+    const [{ count }] = await db
+      .select({ count: sql<number>`COUNT(*)::int` })
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.status, "scheduled"),
+          isNull(tasks.scheduledAt),
+          eq(tasks.modelId, task.modelId),
+          lt(tasks.createdAt, task.createdAt),
+        ),
+      );
+    queueAhead = count ?? 0;
+  }
 
   const rawItems = await db
     .select()
@@ -221,10 +241,22 @@ export default async function TaskDetailPage({
         <p className="text-sm text-[var(--vc-text-muted)]">
           创建于 {new Date(task.createdAt).toLocaleString("zh-CN")}
         </p>
-        {task.status === "scheduled" && task.scheduledAt && (
-          <p className="text-sm text-purple-300/90">
-            预计执行于 {formatShanghaiTime(task.scheduledAt)}（北京时间）
-          </p>
+        {task.status === "scheduled" && (
+          task.scheduledAt ? (
+            <p className="text-sm text-purple-300/90">
+              预计执行于 {formatShanghaiTime(task.scheduledAt)}（北京时间）
+            </p>
+          ) : (
+            queueAhead > 0 ? (
+              <p className="text-sm text-purple-300/90">
+                排队中，前面还有 {queueAhead} 个，预计 {estimateQueueWaitMinutes({ queueAhead, drainRatePerMin: 4 })} 分钟
+              </p>
+            ) : (
+              <p className="text-sm text-purple-300/90">
+                排队中，等待容量释放
+              </p>
+            )
+          )
         )}
         <Link
           href="/tasks"

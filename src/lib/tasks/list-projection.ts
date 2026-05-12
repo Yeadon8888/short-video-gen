@@ -25,11 +25,18 @@ export type TaskListTask = Omit<
     | "scheduledAt"
     | "createdAt"
     | "requestedCount"
+    | "modelId"
   >,
   "paramsJson"
 > & {
   paramsJson: TaskListParams | null;
   resultUrlCount: number;
+  /**
+   * 当任务处于 ASAP 队列（status='scheduled' AND scheduledAt IS NULL）时，
+   * 同模型同队列中比本任务更早创建的排队数。非排队任务始终为 0。
+   * 仅用于 UI 展示"前面还有 N 个"。
+   */
+  queueAhead: number;
 };
 
 export type TaskListGroup = Pick<
@@ -69,8 +76,24 @@ export const taskListTaskColumns = {
   scheduledAt: tasks.scheduledAt,
   createdAt: tasks.createdAt,
   requestedCount: tasks.requestedCount,
+  modelId: tasks.modelId,
   resultUrlCount: sql<number>`
     coalesce(jsonb_array_length(coalesce(${tasks.resultUrls}, '[]'::jsonb)), 0)
+  `,
+  /**
+   * 仅对 ASAP 队列任务（status='scheduled' AND scheduled_at IS NULL）有意义。
+   * 同模型下 createdAt 更早的排队任务数。其余情况返回 0。
+   */
+  queueAhead: sql<number>`
+    case when ${tasks.status} = 'scheduled' and ${tasks.scheduledAt} is null
+      then (
+        select count(*)::int from ${tasks} t2
+        where t2.status = 'scheduled' and t2.scheduled_at is null
+          and t2.model_id = ${tasks.modelId}
+          and t2.created_at < ${tasks.createdAt}
+      )
+      else 0
+    end
   `,
 };
 

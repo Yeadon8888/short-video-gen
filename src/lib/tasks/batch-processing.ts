@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { taskGroups, taskItems, taskSlots, tasks } from "@/lib/db/schema";
+import { models, taskGroups, taskItems, taskSlots, tasks } from "@/lib/db/schema";
 import type { FulfillmentMode, TaskParamsSnapshot } from "@/lib/video/types";
 import { fetchAssetBuffer, loadUserPrompts } from "@/lib/storage/gateway";
 import { generateCopy, generateScript } from "@/lib/gemini";
@@ -75,7 +75,36 @@ export async function processPendingBatchTasks(params: {
     requestedCount: requestedLimit,
   });
 
-  if (limit <= 0) {
+  // 如果整个 group 是 grok2api 模型，进一步把 limit 钳到池剩余容量内。
+  // 解决批量带货绕过 /api/generate 队列直接撞 grok 350/2h 上限的问题。
+  let effectiveLimit = limit;
+  const [groupModelRow] = await db
+    .select({ provider: models.provider })
+    .from(models)
+    .innerJoin(tasks, eq(tasks.modelId, models.id))
+    .where(eq(tasks.taskGroupId, group.id))
+    .limit(1);
+  const groupModel = groupModelRow?.provider ?? null;
+
+  if (groupModel === "grok2api") {
+    const { getGrokPoolCapacity, getGrokPoolUsageRecent2h } = await import(
+      "@/lib/video/providers/grok-pool"
+    );
+    const capacity = await getGrokPoolCapacity();
+    const poolUsed = await getGrokPoolUsageRecent2h();
+    const poolAvailable = Math.max(0, capacity - poolUsed);
+    effectiveLimit = Math.min(effectiveLimit, poolAvailable);
+
+    // 仅在 clamp 真正生效时打日志，避免低峰时噪音
+    if (effectiveLimit < limit) {
+      console.info(
+        `[batch-processing] grok2api pool clamp engaged for group ${group.id}: ` +
+          `limit ${limit} → ${effectiveLimit} (capacity=${capacity}, used=${poolUsed})`,
+      );
+    }
+  }
+
+  if (effectiveLimit <= 0) {
     return { processed: 0, failed: 0 };
   }
 
@@ -84,7 +113,7 @@ export async function processPendingBatchTasks(params: {
     .from(tasks)
     .where(and(eq(tasks.taskGroupId, group.id), eq(tasks.status, "pending")))
     .orderBy(asc(tasks.createdAt))
-    .limit(limit);
+    .limit(effectiveLimit);
 
   // Process sub-tasks within this group concurrently. Previously this was a
   // serial for-loop with `await delayStaggeredSubmission(submissionIndex++)`

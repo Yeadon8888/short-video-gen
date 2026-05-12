@@ -12,6 +12,7 @@ import {
 } from "@/lib/tasks/expiry-meta";
 import { getTaskSourceModeLabel } from "@/lib/tasks/presentation";
 import { summarizeBatchTaskVideos } from "@/lib/tasks/batch-math";
+import { estimateQueueWaitMinutes } from "@/lib/video/providers/grok-pool-shared";
 import { TaskGroupDownloadButton } from "@/components/tasks/TaskGroupDownloadButton";
 import { TaskZipDownloadButton } from "@/components/tasks/TaskZipDownloadButton";
 
@@ -266,10 +267,22 @@ export function TaskList({
                   </span>
                 </div>
 
-                {task.status === "scheduled" && task.scheduledAt && (
-                  <p className="mt-2 text-xs text-purple-300/90">
-                    预计执行：北京时间 {formatScheduledAt(task.scheduledAt)}
-                  </p>
+                {task.status === "scheduled" && (
+                  task.scheduledAt ? (
+                    <p className="mt-2 text-xs text-purple-300/90">
+                      预计执行：北京时间 {formatScheduledAt(task.scheduledAt)}
+                    </p>
+                  ) : (
+                    (task.queueAhead ?? 0) > 0 ? (
+                      <p className="mt-2 text-xs text-purple-300/90">
+                        排队中，前面还有 {task.queueAhead} 个，预计 {estimateQueueWaitMinutes({ queueAhead: task.queueAhead ?? 0, drainRatePerMin: 4 })} 分钟
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-xs text-purple-300/90">
+                        排队中，等待容量释放
+                      </p>
+                    )
+                  )
                 )}
 
                 {task.inputText && (

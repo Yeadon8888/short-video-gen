@@ -33,6 +33,17 @@
 - provider create 请求之间保留固定间隔；默认按 2 秒节奏依次提交。
 - provider 适配层内部若一次要创建多条视频任务，也必须复用同一节流间隔；不能绕过队列规则自己连发。
 
+## grok2api 池容量感知队列
+
+`scheduled` 状态承担两种语义：
+
+- `scheduled_at IS NULL` — ASAP 队列。grok2api 模型在提交时如果池子最近 2h 已用容量超阈值，自动进队列；drain 由现有 per-minute pg_cron tick 触发，按 `min(余量, GROK_DRAIN_BUDGET_PER_TICK)` 节奏放出。
+- `scheduled_at` 非 NULL — 老的"指定时间执行"语义，仅 admin/内部 fallback 用。
+
+并发安全靠 `FOR UPDATE SKIP LOCKED`，不是 advisory lock（postgres.js 连接池会让 session-scoped lock 在不同连接上释放，不安全）。
+
+公平规则：单用户在队列中前 10 条 FIFO 优先；第 11 条起降权，让位给其他用户的新提交。常量见 `src/lib/video/providers/grok-pool.ts`。
+
 ## 变更日志
 
 - 2026-03-29：新增 ZIP 下载与视频过期清理模块。

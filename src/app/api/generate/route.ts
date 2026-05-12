@@ -16,7 +16,7 @@ import {
 } from "@/lib/tikhub";
 import { db } from "@/lib/db";
 import { tasks, creditTxns, users } from "@/lib/db/schema";
-import { eq, sql, and } from "drizzle-orm";
+import { eq, sql, and, isNull, lt } from "drizzle-orm";
 import { failTaskAndRefund } from "@/lib/tasks/reconciliation";
 import { insertTaskItemsFromSubmission } from "@/lib/tasks/items";
 import {
@@ -37,18 +37,6 @@ const MAX_REFERENCE_IMAGES = 4;
 
 function sseData(obj: unknown): string {
   return `data: ${JSON.stringify(obj)}\n\n`;
-}
-
-function formatShanghaiTime(date: Date): string {
-  return new Intl.DateTimeFormat("zh-CN", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(date);
 }
 
 export function resolveOutputLanguage(
@@ -84,7 +72,6 @@ export async function POST(req: NextRequest) {
     sourceMode,
     selectedImageIds,
     params,
-    scheduled,
     fulfillmentMode: rawFulfillmentMode,
   } = body;
   const requestedFulfillmentMode = rawFulfillmentMode === "backfill_until_target"
@@ -122,7 +109,7 @@ export async function POST(req: NextRequest) {
           requestedFulfillmentMode,
           provider: modelRow.provider,
           count,
-          scheduled: Boolean(scheduled),
+          scheduled: false,
         });
         const fulfillmentMode = submissionPlan.fulfillmentMode;
         const totalCost = creditsPerGen * count;
@@ -297,92 +284,117 @@ export async function POST(req: NextRequest) {
           },
         });
 
-        // ── Step 4: Check if scheduled (deferred) mode ──
+        // ── Step 4: Check if grok2api pool is saturated → queue ──
 
-        if (scheduled) {
-          // Compute next 2:00 AM UTC+8
-          const now = new Date();
-          const utc8 = new Date(now.getTime() + 8 * 60 * 60 * 1000);
-          const target = new Date(utc8);
-          target.setHours(2, 0, 0, 0);
-          if (target <= utc8) target.setDate(target.getDate() + 1);
-          const scheduledAt = new Date(target.getTime() - 8 * 60 * 60 * 1000); // back to UTC
+        if (modelRow?.provider === "grok2api") {
+          const { getGrokPoolUsageRecent2h, getGrokPoolCapacity, estimateQueueWaitMinutes } =
+            await import("@/lib/video/providers/grok-pool");
+          const poolUsed = await getGrokPoolUsageRecent2h();
+          const capacity = await getGrokPoolCapacity();
 
-          const taskType = type === "theme" ? "theme" : type === "url" ? "url" : "remix";
-          const scheduledResult = await db.transaction(async (tx) => {
-            const [task] = await tx
-              .insert(tasks)
-              .values({
+          if (poolUsed + count > capacity) {
+            // Queue this task: write status='scheduled' with scheduledAt=NULL
+            const taskType = type === "theme" ? "theme" : type === "url" ? "url" : "remix";
+            const queuedResult = await db.transaction(async (tx) => {
+              const [task] = await tx
+                .insert(tasks)
+                .values({
+                  userId: user.id,
+                  type: taskType as "theme" | "remix" | "url",
+                  status: "scheduled",
+                  modelId: modelRow?.id,
+                  inputText:
+                    taskType === "remix"
+                      ? (effectiveCreativeBrief || "视频二创")
+                      : input,
+                  videoSourceUrl: type === "url" || type === "video_key" ? input : null,
+                  soraPrompt,
+                  scriptJson: scriptResult,
+                  creditsCost: totalCost,
+                  scheduledAt: null,   // ASAP queue semantics
+                  paramsJson: {
+                    orientation: params.orientation,
+                    duration: params.duration,
+                    count,
+                    platform: params.platform ?? "tiktok",
+                    outputLanguage: resolvedOutputLanguage,
+                    model: modelSlug,
+                    imageUrls: referenceImageUrls,
+                    sourceMode: effectiveSourceMode,
+                    creativeBrief: effectiveCreativeBrief,
+                    selectedImageIds: selectedAssets.map((asset) => asset.id),
+                    selectedAssets,
+                  },
+                })
+                .returning();
+
+              const [deducted] = await tx
+                .update(users)
+                .set({ credits: sql`${users.credits} - ${totalCost}` })
+                .where(and(eq(users.id, user.id), sql`${users.credits} >= ${totalCost}`))
+                .returning({ credits: users.credits });
+
+              if (!deducted) {
+                await tx
+                  .update(tasks)
+                  .set({ status: "failed", errorMessage: "积分不足（并发扣费）" })
+                  .where(eq(tasks.id, task.id));
+                return { task, deducted: null };
+              }
+
+              await tx.insert(creditTxns).values({
                 userId: user.id,
-                type: taskType as "theme" | "remix" | "url",
-                status: "scheduled",
+                type: "consume",
+                amount: -totalCost,
+                reason: `自动排队 (${modelSlug} × ${count})`,
                 modelId: modelRow?.id,
-                inputText:
-                  taskType === "remix"
-                    ? (effectiveCreativeBrief || "视频二创")
-                    : input,
-                videoSourceUrl: type === "url" || type === "video_key" ? input : null,
-                soraPrompt,
-                scriptJson: scriptResult,
-                creditsCost: totalCost,
-                scheduledAt,
-                paramsJson: {
-                  orientation: params.orientation,
-                  duration: params.duration,
-                  count,
-                  platform: params.platform ?? "tiktok",
-                  outputLanguage: resolvedOutputLanguage,
-                  model: modelSlug,
-                  imageUrls: referenceImageUrls,
-                  sourceMode: effectiveSourceMode,
-                  creativeBrief: effectiveCreativeBrief,
-                  selectedImageIds: selectedAssets.map((asset) => asset.id),
-                  selectedAssets,
-                },
-              })
-              .returning();
+                taskId: task.id,
+                balanceAfter: deducted.credits,
+              });
 
-            const [deducted] = await tx
-              .update(users)
-              .set({ credits: sql`${users.credits} - ${totalCost}` })
-              .where(and(eq(users.id, user.id), sql`${users.credits} >= ${totalCost}`))
-              .returning({ credits: users.credits });
-
-            if (!deducted) {
-              await tx
-                .update(tasks)
-                .set({ status: "failed", errorMessage: "积分不足（并发扣费）" })
-                .where(eq(tasks.id, task.id));
-
-              return { task, deducted: null };
-            }
-
-            await tx.insert(creditTxns).values({
-              userId: user.id,
-              type: "consume",
-              amount: -totalCost,
-              reason: `定时生成 (${modelSlug} × ${count})`,
-              modelId: modelRow?.id,
-              taskId: task.id,
-              balanceAfter: deducted.credits,
+              return { task, deducted };
             });
 
-            return { task, deducted };
-          });
+            if (!queuedResult.deducted) {
+              send({
+                type: "error",
+                code: "INSUFFICIENT_CREDITS",
+                message: "积分不足，请充值后重试。",
+              });
+              send({ type: "done" });
+              controller.close();
+              return;
+            }
 
-          if (!scheduledResult.deducted) {
-            send({ type: "error", code: "INSUFFICIENT_CREDITS", message: "积分不足，请充值后重试。" });
+            // 估算队列位置（粗略，仅用于 UI 提示）
+            const [{ count: queueAhead }] = await db
+              .select({ count: sql<number>`COUNT(*)::int` })
+              .from(tasks)
+              .where(
+                and(
+                  eq(tasks.status, "scheduled"),
+                  isNull(tasks.scheduledAt),
+                  eq(tasks.modelId, modelRow.id),
+                  lt(tasks.createdAt, queuedResult.task.createdAt),
+                ),
+              );
+            const estimatedMinutes = estimateQueueWaitMinutes({
+              queueAhead: Number(queueAhead ?? 0),
+              drainRatePerMin: 4,
+            });
+
+            log(`grok 池暂时已满，任务已自动加入队列`);
+            log(`队列位置：前面还有 ${queueAhead} 个，预计 ${estimatedMinutes} 分钟开始`);
+            send({
+              type: "queued",
+              queueAhead: Number(queueAhead ?? 0),
+              estimatedWaitMinutes: estimatedMinutes,
+            });
+            send({ type: "stage", stage: "DONE" });
             send({ type: "done" });
             controller.close();
             return;
           }
-
-          log(`任务已加入定时托管，将在凌晨 2:00 执行`);
-          log(`预计执行时间：${formatShanghaiTime(scheduledAt)}（北京时间）`);
-          send({ type: "stage", stage: "DONE" });
-          send({ type: "done" });
-          controller.close();
-          return;
         }
 
         // ── Step 4b: Deduct credits FIRST, then submit Sora task ──
