@@ -31,6 +31,8 @@ async function main() {
   const tickUrl = "https://video.yeadon.top/api/internal/tasks/tick";
   const thumbBackfillUrl = "https://video.yeadon.top/api/internal/gallery/thumbnail-backfill";
   const assetTransformUrl = "https://video.yeadon.top/api/internal/assets/transforms/process";
+  const enableGalleryThumbnailCron = process.env.ENABLE_GALLERY_THUMBNAIL_CRON === "true";
+  const enableAssetTransformCron = process.env.ENABLE_ASSET_TRANSFORM_CRON === "true";
   const sql = postgres(databaseUrl, { ssl: "require", prepare: false });
   const escapedCronSecret = cronSecret.replace(/'/g, "''");
 
@@ -75,29 +77,29 @@ async function main() {
       )
     `);
 
-    // Thumbnail backfill — every 5 minutes is enough; processes up to
-    // DEFAULT_BATCH (5) gallery rows per run. Catches up within ~10 min
-    // even after a publish burst.
-    await sql.unsafe(`
-      select cron.schedule(
-        'vidclaw-gallery-thumbnail-backfill',
-        '*/5 * * * *',
-        $$${thumbBackfillCommand}$$
-      )
-    `);
+    if (enableGalleryThumbnailCron) {
+      // Thumbnail backfill uses ffmpeg in Vercel Functions; keep it opt-in
+      // so quota incidents don't come back after a cron redeploy.
+      await sql.unsafe(`
+        select cron.schedule(
+          'vidclaw-gallery-thumbnail-backfill',
+          '*/15 * * * *',
+          $$${thumbBackfillCommand}$$
+        )
+      `);
+    }
 
-    // Asset-transform (AI 抠图 / 9:16 白底) drain — every minute. The route
-    // itself is self-draining (up to MAX_CONCURRENT rounds per Vercel
-    // function invocation) but needs SOMEONE to ring the bell after users
-    // leave the page. Without this the tail of a batch gets stranded in
-    // `pending` forever because the only other trigger is user action.
-    await sql.unsafe(`
-      select cron.schedule(
-        'vidclaw-asset-transform-drain',
-        '* * * * *',
-        $$${assetTransformCommand}$$
-      )
-    `);
+    if (enableAssetTransformCron) {
+      // Asset-transform drain can fan out into long-running AI/image work.
+      // User actions still enqueue jobs; this background bell is opt-in.
+      await sql.unsafe(`
+        select cron.schedule(
+          'vidclaw-asset-transform-drain',
+          '*/5 * * * *',
+          $$${assetTransformCommand}$$
+        )
+      `);
+    }
 
     const jobs = await sql`
       select jobid, jobname, schedule, active
@@ -107,6 +109,10 @@ async function main() {
     `;
 
     console.log(JSON.stringify(jobs, null, 2));
+    console.log(JSON.stringify({
+      enableGalleryThumbnailCron,
+      enableAssetTransformCron,
+    }, null, 2));
   } finally {
     await sql.end();
   }

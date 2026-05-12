@@ -13,7 +13,7 @@ test("resolveRemainingSubmissionCapacity fills only remaining batch group capaci
       maxConcurrent: getMaxBatchGroupSubmissionsPerTick(),
       requestedCount: 5,
     }),
-    1,
+    2,
   );
 });
 

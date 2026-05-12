@@ -49,6 +49,14 @@ const defaultModels = [
     defaultParams: { duration: 10, allowedDurations: [10, 15] },
     sortOrder: 3,
   },
+  {
+    name: "Sora 2 Pro 12s 9:16",
+    slug: "sora2-pro-12s-9x16",
+    provider: "nfvid",
+    creditsPerGen: 10,
+    defaultParams: { duration: 12, allowedDurations: [12], group: "vip", stream: false },
+    sortOrder: 4,
+  },
 ];
 
 async function seed() {

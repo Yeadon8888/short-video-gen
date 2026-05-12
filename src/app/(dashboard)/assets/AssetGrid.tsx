@@ -117,10 +117,11 @@ function triggerDownload(url: string, filename: string) {
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = filename;
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
   document.body.appendChild(anchor);
   anchor.click();
   document.body.removeChild(anchor);
-  window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
 // Result assets created by the 9:16 white-bg pipeline carry this filename suffix.
@@ -134,6 +135,11 @@ type TransformJob = {
   errorMessage: string | null;
   creditsCost: number;
 };
+
+interface DirectDownloadResponse {
+  mode: "direct";
+  items: Array<{ url: string; filename: string }>;
+}
 
 export function AssetGrid({ initialAssets }: { initialAssets: UserAsset[] }) {
   const router = useRouter();
@@ -270,16 +276,11 @@ export function AssetGrid({ initialAssets }: { initialAssets: UserAsset[] }) {
   async function handleDownload(assetId: string, filename: string | null) {
     setError(null);
     try {
-      const res = await fetch(`/api/assets/${assetId}/download`, {
-        cache: "no-store",
-      });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(data?.error ?? `下载失败 (HTTP ${res.status})`);
+      const asset = assets.find((item) => item.id === assetId);
+      if (!asset) {
+        throw new Error("图片不存在。");
       }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      triggerDownload(url, filename || `product-image-${assetId.slice(0, 8)}`);
+      triggerDownload(asset.url, filename || `product-image-${assetId.slice(0, 8)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "下载失败");
     }
@@ -301,10 +302,14 @@ export function AssetGrid({ initialAssets }: { initialAssets: UserAsset[] }) {
         const data = (await res.json().catch(() => null)) as { error?: string } | null;
         throw new Error(data?.error ?? `打包失败 (HTTP ${res.status})`);
       }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      triggerDownload(url, "product-images.zip");
-      setInfo(`已开始下载 ${selectedIds.size} 张图片的 ZIP。`);
+      const data = (await res.json()) as DirectDownloadResponse;
+      if (data.mode !== "direct" || data.items.length === 0) {
+        throw new Error("没有可下载的图片。");
+      }
+      data.items.forEach((item, index) => {
+        window.setTimeout(() => triggerDownload(item.url, item.filename), index * 250);
+      });
+      setInfo(`已开始直接下载 ${data.items.length} 张图片。`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "批量下载失败");
     } finally {
@@ -491,7 +496,7 @@ export function AssetGrid({ initialAssets }: { initialAssets: UserAsset[] }) {
               className="inline-flex items-center gap-1 rounded-[var(--vc-radius-sm)] border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-300 transition-colors hover:bg-emerald-500/20 disabled:opacity-50"
             >
               <Download className="h-3.5 w-3.5" />
-              批量下载 ZIP
+              批量下载
             </button>
             <button
               onClick={handleBatchDelete}

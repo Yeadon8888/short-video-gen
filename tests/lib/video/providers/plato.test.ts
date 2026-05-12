@@ -36,7 +36,7 @@ test("platoProvider forwards provider-specific params like watermark", async () 
   }) as typeof fetch;
 
   try {
-    const taskIds = await platoProvider.createTasks({
+    const result = await platoProvider.createTasks({
       model: {
         id: "model_1",
         name: "Sora",
@@ -64,7 +64,7 @@ test("platoProvider forwards provider-specific params like watermark", async () 
       },
     });
 
-    assert.deepEqual(taskIds, ["task_123"]);
+    assert.deepEqual(result.providerTaskIds, ["task_123"]);
     assert.ok(capturedBody);
     const body = capturedBody as Record<string, unknown>;
     assert.equal(body.watermark, false);

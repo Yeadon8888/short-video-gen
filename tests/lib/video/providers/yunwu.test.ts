@@ -53,7 +53,7 @@ test("yunwuProvider creates video tasks with yunwu payload", async () => {
   }) as typeof fetch;
 
   try {
-    const taskIds = await yunwuProvider.createTasks({
+    const result = await yunwuProvider.createTasks({
       model: baseModel,
       params: {
         prompt: "cat fish --mode=custom",
@@ -68,7 +68,7 @@ test("yunwuProvider creates video tasks with yunwu payload", async () => {
       },
     });
 
-    assert.deepEqual(taskIds, ["grok:299604b7-c5ea-47b5-bc64-c06f300f0d27"]);
+    assert.deepEqual(result.providerTaskIds, ["grok:299604b7-c5ea-47b5-bc64-c06f300f0d27"]);
     assert.deepEqual(capturedBody, {
       model: "grok-video-3",
       prompt: "cat fish --mode=custom",

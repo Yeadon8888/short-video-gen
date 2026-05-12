@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { desc, eq, and, sql } from "drizzle-orm";
+import { desc, eq, and } from "drizzle-orm";
 import { unstable_cache, revalidateTag } from "next/cache";
 import { db } from "@/lib/db";
 import { galleryItems, tasks, users } from "@/lib/db/schema";
@@ -60,7 +60,17 @@ export async function GET(req: NextRequest) {
   const items = await getGalleryPage(page, limit);
   t.end("fetch");
 
-  return NextResponse.json({ items, page, limit }, { headers: t.headers() });
+  return NextResponse.json(
+    { items, page, limit },
+    {
+      headers: {
+        ...t.headers(),
+        "Cache-Control": "public, max-age=0, must-revalidate",
+        "CDN-Cache-Control": "public, s-maxage=120, stale-while-revalidate=300",
+        "Vercel-CDN-Cache-Control": "public, s-maxage=120, stale-while-revalidate=300",
+      },
+    },
+  );
 }
 
 /**

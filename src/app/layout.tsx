@@ -1,19 +1,5 @@
 import type { Metadata } from "next";
-import { Plus_Jakarta_Sans, Inter } from "next/font/google";
 import "./globals.css";
-
-const jakarta = Plus_Jakarta_Sans({
-  subsets: ["latin"],
-  variable: "--font-jakarta",
-  display: "swap",
-  weight: ["500", "600", "700"],
-});
-
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-  display: "swap",
-});
 
 const SITE_URL = "https://video.yeadon.top";
 const SITE_NAME = "VidClaw V2";
@@ -134,8 +120,12 @@ export default function RootLayout({
   return (
     <html
       lang="zh-CN"
-      className={`dark ${jakarta.variable} ${inter.variable}`}
+      className="dark"
       style={{
+        ["--font-jakarta" as string]:
+          '"Inter", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif',
+        ["--font-inter" as string]:
+          '"Inter", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif',
         ["--font-jetbrains" as string]:
           '"SF Mono", "Cascadia Code", "Fira Code", ui-monospace, monospace',
       }}
