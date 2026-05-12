@@ -78,13 +78,13 @@ export async function processPendingBatchTasks(params: {
   // 如果整个 group 是 grok2api 模型，进一步把 limit 钳到池剩余容量内。
   // 解决批量带货绕过 /api/generate 队列直接撞 grok 350/2h 上限的问题。
   let effectiveLimit = limit;
-  const groupModel = activeChildTasks.length > 0
-    ? await db.select({ provider: models.provider }).from(models)
-        .innerJoin(tasks, eq(tasks.modelId, models.id))
-        .where(eq(tasks.id, activeChildTasks[0].id))
-        .limit(1)
-        .then((rows) => rows[0]?.provider ?? null)
-    : null;
+  const [groupModelRow] = await db
+    .select({ provider: models.provider })
+    .from(models)
+    .innerJoin(tasks, eq(tasks.modelId, models.id))
+    .where(eq(tasks.taskGroupId, group.id))
+    .limit(1);
+  const groupModel = groupModelRow?.provider ?? null;
 
   if (groupModel === "grok2api") {
     const { getGrokPoolCapacity, getGrokPoolUsageRecent2h } = await import(
@@ -94,6 +94,14 @@ export async function processPendingBatchTasks(params: {
     const poolUsed = await getGrokPoolUsageRecent2h();
     const poolAvailable = Math.max(0, capacity - poolUsed);
     effectiveLimit = Math.min(effectiveLimit, poolAvailable);
+
+    // 仅在 clamp 真正生效时打日志，避免低峰时噪音
+    if (effectiveLimit < limit) {
+      console.info(
+        `[batch-processing] grok2api pool clamp engaged for group ${group.id}: ` +
+          `limit ${limit} → ${effectiveLimit} (capacity=${capacity}, used=${poolUsed})`,
+      );
+    }
   }
 
   if (effectiveLimit <= 0) {
