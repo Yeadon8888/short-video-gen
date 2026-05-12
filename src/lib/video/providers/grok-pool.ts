@@ -2,6 +2,11 @@ import { and, eq, gt, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { models, taskItems, tasks, systemConfig } from "@/lib/db/schema";
 
+export {
+  estimateQueueWaitMinutes,
+  type WaitEstimateInput,
+} from "./grok-pool-shared";
+
 /** Grok Super 账号 7 × 50 quota / 2h = 350. Admin 改账号数时改 system_config. */
 export const GROK_POOL_CAPACITY_DEFAULT = 350;
 /** 单 tick drain 上限. 5 tasks × ~90s parallel ≈ 90s wall clock < 300s Vercel. */
@@ -55,16 +60,6 @@ export function pickQueueDrainCandidates(
     return a.task.createdAt.getTime() - b.task.createdAt.getTime();
   });
   return annotated.slice(0, opts.budget).map((a) => a.task.id);
-}
-
-export interface WaitEstimateInput {
-  queueAhead: number;
-  drainRatePerMin: number;
-}
-
-export function estimateQueueWaitMinutes(input: WaitEstimateInput): number {
-  if (input.queueAhead <= 0) return 0;
-  return Math.ceil(input.queueAhead / input.drainRatePerMin);
 }
 
 /**

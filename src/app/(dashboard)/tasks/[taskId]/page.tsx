@@ -21,6 +21,7 @@ import {
   extractHashtags,
   getTaskSourceModeLabel,
 } from "@/lib/tasks/presentation";
+import { estimateQueueWaitMinutes } from "@/lib/video/providers/grok-pool-shared";
 
 function formatShanghaiTime(value: string | Date | null | undefined): string | null {
   if (!value) return null;
@@ -246,9 +247,15 @@ export default async function TaskDetailPage({
               预计执行于 {formatShanghaiTime(task.scheduledAt)}（北京时间）
             </p>
           ) : (
-            <p className="text-sm text-purple-300/90">
-              排队中，前面还有 {queueAhead} 个，预计 {Math.max(1, Math.ceil(queueAhead / 4))} 分钟
-            </p>
+            queueAhead > 0 ? (
+              <p className="text-sm text-purple-300/90">
+                排队中，前面还有 {queueAhead} 个，预计 {estimateQueueWaitMinutes({ queueAhead, drainRatePerMin: 4 })} 分钟
+              </p>
+            ) : (
+              <p className="text-sm text-purple-300/90">
+                排队中，等待容量释放
+              </p>
+            )
           )
         )}
         <Link
