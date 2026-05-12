@@ -16,7 +16,7 @@ import {
 } from "@/lib/tikhub";
 import { db } from "@/lib/db";
 import { tasks, creditTxns, users } from "@/lib/db/schema";
-import { eq, sql, and, isNull } from "drizzle-orm";
+import { eq, sql, and, isNull, lt } from "drizzle-orm";
 import { failTaskAndRefund } from "@/lib/tasks/reconciliation";
 import { insertTaskItemsFromSubmission } from "@/lib/tasks/items";
 import {
@@ -374,7 +374,7 @@ export async function POST(req: NextRequest) {
                 and(
                   eq(tasks.status, "scheduled"),
                   isNull(tasks.scheduledAt),
-                  sql`${tasks.createdAt} < ${queuedResult.task.createdAt}`,
+                  lt(tasks.createdAt, queuedResult.task.createdAt),
                 ),
               );
             const estimatedMinutes = estimateQueueWaitMinutes({
