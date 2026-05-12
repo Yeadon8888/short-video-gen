@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { CalendarClock, RefreshCw, Zap, Loader2 } from "lucide-react";
+import { RefreshCw, Zap, Loader2 } from "lucide-react";
 import { useGenerateStore } from "@/stores/generate";
 import type { FulfillmentMode } from "@/lib/video/types";
 import { GenerateFormPanels } from "@/components/generate/GenerateFormPanels";
@@ -38,7 +38,6 @@ export default function GeneratePage() {
   const [batchUnitsPerProduct, setBatchUnitsPerProduct] = useState(1);
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
   const [batchImageIds, setBatchImageIds] = useState<string[]>([]);
-  const [scheduled, setScheduled] = useState(false);
   const [fulfillmentMode, setFulfillmentMode] = useState<FulfillmentMode>("standard");
   const [pendingVideo, setPendingVideo] = useState<PendingVideo | null>(null);
   const [batchSummary, setBatchSummary] = useState<BatchSummary | null>(null);
@@ -85,8 +84,7 @@ export default function GeneratePage() {
         sourceMode: "theme",
         selectedImageIds,
         params,
-        scheduled,
-        fulfillmentMode: scheduled ? "standard" : fulfillmentMode,
+        fulfillmentMode,
       });
       return;
     }
@@ -100,8 +98,7 @@ export default function GeneratePage() {
         sourceMode: "url",
         selectedImageIds,
         params,
-        scheduled,
-        fulfillmentMode: scheduled ? "standard" : fulfillmentMode,
+        fulfillmentMode,
       });
       return;
     }
@@ -115,8 +112,7 @@ export default function GeneratePage() {
         sourceMode: "upload",
         selectedImageIds,
         params,
-        scheduled,
-        fulfillmentMode: scheduled ? "standard" : fulfillmentMode,
+        fulfillmentMode,
       });
       return;
     }
@@ -205,50 +201,29 @@ export default function GeneratePage() {
 
         {/* Mode toggles */}
         <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-[var(--vc-border)]/40 pt-4">
-          {!scheduled && (
-            <button
-              onClick={() =>
-                setFulfillmentMode((m) =>
-                  m === "backfill_until_target" ? "standard" : "backfill_until_target",
-                )
-              }
-              disabled={isLoading}
-              className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs transition-all ${
-                fulfillmentMode === "backfill_until_target"
-                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                  : "border-[var(--vc-border)] text-slate-500 hover:border-emerald-500/30 hover:text-emerald-300"
-              }`}
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              失败自动补齐
-            </button>
-          )}
-          {activeTab !== "batch" && (
-            <button
-              onClick={() => setScheduled((value) => !value)}
-              disabled={isLoading}
-              className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs transition-all ${
-                scheduled
-                  ? "border-purple-500/40 bg-purple-500/10 text-purple-300"
-                  : "border-[var(--vc-border)] text-slate-500 hover:border-purple-500/30 hover:text-purple-300"
-              }`}
-            >
-              <CalendarClock className="h-3.5 w-3.5" />
-              次日 02:00 执行
-            </button>
-          )}
+          <button
+            onClick={() =>
+              setFulfillmentMode((m) =>
+                m === "backfill_until_target" ? "standard" : "backfill_until_target",
+              )
+            }
+            disabled={isLoading}
+            className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs transition-all ${
+              fulfillmentMode === "backfill_until_target"
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                : "border-[var(--vc-border)] text-slate-500 hover:border-emerald-500/30 hover:text-emerald-300"
+            }`}
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            失败自动补齐
+          </button>
 
           {/* Hint text */}
-          {fulfillmentMode === "backfill_until_target" && !scheduled && (
+          {fulfillmentMode === "backfill_until_target" && (
             <span className="text-xs text-slate-500">
               {activeTab === "batch"
                 ? `共 ${batchImageIds.length || 0} 个商品，计划 ${batchTotalVideos} 条，3 小时内自动补齐`
                 : "失败视频 3 小时内自动补发"}
-            </span>
-          )}
-          {activeTab !== "batch" && scheduled && (
-            <span className="text-xs text-slate-500">
-              先保存脚本并扣积分，北京时间次日 02:00 自动提交
             </span>
           )}
         </div>
@@ -269,9 +244,7 @@ export default function GeneratePage() {
           ? "生成中..."
           : activeTab === "batch"
             ? `创建批量任务 · ${batchTotalVideos} 条`
-            : scheduled
-              ? "定时生成"
-              : `生成 · ${params.count * (params.model ? 1 : 1)} 条视频`}
+            : `生成 · ${params.count * (params.model ? 1 : 1)} 条视频`}
       </button>
 
       {/* ── Results Area ── */}
