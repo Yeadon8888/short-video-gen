@@ -51,6 +51,18 @@ export interface ZipAssetItem {
   fileStem: string;
 }
 
+export interface DirectDownloadItem {
+  url: string;
+  filename: string;
+}
+
+export function buildDirectDownloadItems(items: ZipAssetItem[]): DirectDownloadItem[] {
+  return items.map((item, index) => ({
+    url: item.url,
+    filename: `${sanitizePath(item.fileStem || `file-${index + 1}`, `file-${index + 1}`).replace(/\//g, "-")}.${guessExtension(item.url, "")}`,
+  }));
+}
+
 export async function buildZipArchive(params: {
   items: ZipAssetItem[];
   rootFolder: string;

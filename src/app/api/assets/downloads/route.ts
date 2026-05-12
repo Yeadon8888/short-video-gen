@@ -4,8 +4,7 @@ import { requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { userAssets } from "@/lib/db/schema";
 import {
-  buildZipArchive,
-  contentDispositionAttachment,
+  buildDirectDownloadItems,
 } from "@/lib/tasks/downloads";
 
 export const maxDuration = 300;
@@ -64,19 +63,18 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const zip = await buildZipArchive({
-    rootFolder: "product-images",
-    items: orderedAssets.map((asset, index) => ({
+  const items = orderedAssets.map((asset, index) => ({
       url: asset.url,
       fileStem: `${String(index + 1).padStart(2, "0")}-${removeExtension(asset.filename || `product-image-${asset.id.slice(0, 8)}`)}`,
-    })),
-  });
+    }));
 
-  return new NextResponse(zip, {
+  return NextResponse.json({
+    mode: "direct",
+    filename: "product-images",
+    items: buildDirectDownloadItems(items),
+  }, {
     status: 200,
     headers: {
-      "Content-Type": "application/zip",
-      "Content-Disposition": contentDispositionAttachment("product-images.zip"),
       "Cache-Control": "no-store",
     },
   });

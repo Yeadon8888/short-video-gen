@@ -3,10 +3,14 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { tasks } from "@/lib/db/schema";
-import { buildZipArchive } from "@/lib/tasks/downloads";
+import {
+  buildDirectDownloadItems,
+  buildZipArchive,
+  contentDispositionAttachment,
+} from "@/lib/tasks/downloads";
 
 export async function GET(
-  _req: Request,
+  req: Request,
   context: { params: Promise<{ taskId: string }> },
 ) {
   const authResult = await requireAuth();
@@ -39,16 +43,26 @@ export async function GET(
     );
   }
 
-  const zip = await buildZipArchive({
-    items,
-    rootFolder: `task-${task.id.slice(0, 8)}`,
-  });
+  const filename = `task-${task.id.slice(0, 8)}`;
+  if (new URL(req.url).searchParams.get("mode") === "zip") {
+    const zip = await buildZipArchive({ items, rootFolder: filename });
+    return new NextResponse(zip, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Disposition": contentDispositionAttachment(`${filename}.zip`),
+        "Cache-Control": "no-store",
+      },
+    });
+  }
 
-  return new NextResponse(zip, {
+  return NextResponse.json({
+    mode: "direct",
+    filename,
+    items: buildDirectDownloadItems(items),
+  }, {
     status: 200,
     headers: {
-      "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="task-${task.id.slice(0, 8)}.zip"`,
       "Cache-Control": "no-store",
     },
   });

@@ -3,21 +3,8 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { userAssets } from "@/lib/db/schema";
-import { fetchAssetBuffer } from "@/lib/storage/gateway";
-import {
-  contentDispositionAttachment,
-  sanitizeDownloadFilename,
-} from "@/lib/tasks/downloads";
 
 export const maxDuration = 120;
-
-function extensionFromMimeType(mimeType: string): string {
-  if (mimeType.includes("png")) return "png";
-  if (mimeType.includes("jpeg") || mimeType.includes("jpg")) return "jpg";
-  if (mimeType.includes("webp")) return "webp";
-  if (mimeType.includes("gif")) return "gif";
-  return "bin";
-}
 
 export async function GET(
   _req: Request,
@@ -32,7 +19,6 @@ export async function GET(
     .select({
       id: userAssets.id,
       url: userAssets.url,
-      filename: userAssets.filename,
     })
     .from(userAssets)
     .where(
@@ -51,18 +37,5 @@ export async function GET(
     );
   }
 
-  const fetched = await fetchAssetBuffer(asset.url);
-  const filename = sanitizeDownloadFilename(
-    asset.filename || `product-image-${asset.id.slice(0, 8)}.${extensionFromMimeType(fetched.mimeType)}`,
-    `product-image-${asset.id.slice(0, 8)}`,
-  );
-
-  return new NextResponse(fetched.buffer, {
-    status: 200,
-    headers: {
-      "Content-Type": fetched.mimeType,
-      "Content-Disposition": contentDispositionAttachment(filename),
-      "Cache-Control": "no-store",
-    },
-  });
+  return NextResponse.redirect(asset.url, 302);
 }

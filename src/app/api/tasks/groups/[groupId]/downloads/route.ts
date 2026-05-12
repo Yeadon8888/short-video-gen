@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { taskGroups, tasks } from "@/lib/db/schema";
 import {
+  buildDirectDownloadItems,
   buildZipArchive,
   contentDispositionAttachment,
   type ZipAssetItem,
@@ -29,7 +30,7 @@ function buildTaskZipItems(childTasks: Array<{
 }
 
 export async function GET(
-  _req: Request,
+  req: Request,
   context: { params: Promise<{ groupId: string }> },
 ) {
   const authResult = await requireAuth();
@@ -68,17 +69,26 @@ export async function GET(
     );
   }
 
-  const filename = `task-group-${group.id.slice(0, 8)}.zip`;
-  const zip = await buildZipArchive({
-    items,
-    rootFolder: `task-group-${group.id.slice(0, 8)}`,
-  });
+  const filename = `task-group-${group.id.slice(0, 8)}`;
+  if (new URL(req.url).searchParams.get("mode") === "zip") {
+    const zip = await buildZipArchive({ items, rootFolder: filename });
+    return new NextResponse(zip, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Disposition": contentDispositionAttachment(`${filename}.zip`),
+        "Cache-Control": "no-store",
+      },
+    });
+  }
 
-  return new NextResponse(zip, {
+  return NextResponse.json({
+    mode: "direct",
+    filename,
+    items: buildDirectDownloadItems(items),
+  }, {
     status: 200,
     headers: {
-      "Content-Type": "application/zip",
-      "Content-Disposition": contentDispositionAttachment(filename),
       "Cache-Control": "no-store",
     },
   });
