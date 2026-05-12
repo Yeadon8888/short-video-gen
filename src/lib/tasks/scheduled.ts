@@ -135,6 +135,7 @@ export async function processDueScheduledTasks(options?: {
           .update(tasks)
           .set({
             status: "generating",
+            startedAt: new Date(),
             errorMessage: null,
           })
           .where(
@@ -173,7 +174,7 @@ export async function processDueScheduledTasks(options?: {
       if (!alreadyClaimed) {
         const [c] = await db
           .update(tasks)
-          .set({ status: "generating", scheduledAt: null, errorMessage: null })
+          .set({ status: "generating", startedAt: new Date(), scheduledAt: null, errorMessage: null })
           .where(and(eq(tasks.id, task.id), eq(tasks.status, "scheduled")))
           .returning();
         if (!c) return; // 已被并发 tick 抢走

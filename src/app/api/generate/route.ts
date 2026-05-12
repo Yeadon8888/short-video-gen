@@ -374,6 +374,7 @@ export async function POST(req: NextRequest) {
                 and(
                   eq(tasks.status, "scheduled"),
                   isNull(tasks.scheduledAt),
+                  eq(tasks.modelId, modelRow.id),
                   lt(tasks.createdAt, queuedResult.task.createdAt),
                 ),
               );

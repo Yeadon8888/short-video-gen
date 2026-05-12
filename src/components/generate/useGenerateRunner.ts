@@ -18,6 +18,8 @@ interface SSEEvent {
   fulfillmentMode?: FulfillmentMode;
   requestedCount?: number;
   deliveryDeadlineAt?: string;
+  queueAhead?: number;
+  estimatedWaitMinutes?: number;
 }
 
 export function useGenerateRunner(params: {
@@ -333,6 +335,17 @@ export function useGenerateRunner(params: {
                 void pollSoraTasks(taskIds, event.sora_prompt);
               }
             }
+            continue;
+          }
+
+          if (event.type === "queued") {
+            // SSE protocol contract: the server emits `queued` when a grok2api
+            // task hits pool saturation and is parked in the ASAP queue. The
+            // human-readable wait info is already surfaced via the textual
+            // `log` events emitted just before this; here we just acknowledge
+            // the structured event so it isn't dropped into an "unknown type"
+            // path. No store mutation is needed — the subsequent `stage: DONE`
+            // + `done` events drive the final UI state.
             continue;
           }
 
