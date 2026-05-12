@@ -41,10 +41,12 @@ export function resolveLanguageSpec(outputLanguage?: OutputLanguage): {
         "If the user explicitly specifies a language, all spoken dialogue, voiceover, title, caption, hashtags, and first_comment must use that language consistently. Do not silently switch to English.",
     };
   }
+  const localeInstruction =
+    outputLanguage === "ms" ? " For Malay (Malaysia), use Malay as used in Malaysia." : "";
   return {
     spoken: lang.spokenName,
     content: lang.spokenName,
-    instruction: `All spoken dialogue, voiceover, title, caption, hashtags, and first_comment must be in ${lang.spokenName}. Do not output English copy unless the selected output language is English. For Malay (Malaysia), use Malay as used in Malaysia. Do not silently switch to English or any other language.`,
+    instruction: `All spoken dialogue, voiceover, title, caption, hashtags, and first_comment must be in ${lang.spokenName}. Do not output English copy unless the selected output language is English.${localeInstruction} Do not silently switch to English or any other language.`,
   };
 }
 
@@ -64,7 +66,9 @@ const JSON_OUTPUT_SUFFIX = `
       "scene_zh": "镜头1的中文场景描述",
       "sora_prompt": "English Sora prompt for shot 1 only",
       "duration_s": 3,
-      "camera": "close-up"
+      "camera": "close-up",
+      "voiceover": "",
+      "on_screen_text": []
     }
   ],
   "full_sora_prompt": "Complete English Sora prompt combining all shots for direct use",
@@ -72,7 +76,21 @@ const JSON_OUTPUT_SUFFIX = `
     "title": "视频标题（≤20字）",
     "caption": "正文文案，50-100字，末尾附带5-8个可直接发布的平台标签，标签使用空格分隔，不要Markdown格式",
     "first_comment": "首评，30-60字"
-  }
+  },
+  "language": {
+    "spoken": "Language used by dialogue or voiceover in the final video",
+    "content": "Language used by title, caption, hashtags, and first_comment"
+  },
+  "on_screen_text": [
+    {
+      "text": "Only user-requested on-screen text, in the selected output language",
+      "shot_id": 1,
+      "position": "center",
+      "locale": "Language code of the selected output language"
+    }
+  ],
+  "pacing": "fast | medium | slow | or a concise custom pacing instruction",
+  "negative": ["Things that must not appear in the final video"]
 }
 
 ！！！极端重要！！！
@@ -81,6 +99,9 @@ const JSON_OUTPUT_SUFFIX = `
 - JSON 必须合法可解析
 - caption 末尾的标签最多 8 个，使用纯文本格式，例如：#tag1 #tag2 #tag3
 - 不要输出 Markdown、不要用 \`**\` 包裹标签、不要用逗号或列表格式输出标签
+- 默认不要生成字幕、屏幕文字、旁白或台词；只有用户明确要求字幕/屏幕文字/Text on Screen/旁白/Voiceover/台词时，才填写 on_screen_text 和 shots[].voiceover / shots[].on_screen_text，否则用空数组或空字符串
+- 如果用户明确要求的字幕/旁白与手动选择的输出语言冲突，on_screen_text、shots[].voiceover、copy 和 language 字段必须翻译或本地化到手动选择的语言
+- full_sora_prompt 只在用户明确要求时包含字幕、旁白和节奏要求；结构化字幕/旁白字段为空时，不要在 full_sora_prompt 中添加字幕或旁白
 `;
 
 function getFallbackApiKey(env: NodeJS.ProcessEnv = process.env): string {
@@ -239,7 +260,7 @@ export async function generateScript(params: {
     platform === "tiktok"
       ? "\n\n**IMPORTANT: This video is for TikTok. Sora prompts remain in English, but visible copy and spoken language must follow the selected output language constraint below.**"
       : "";
-  const languageInstruction = `\n\n语言强约束：\n- ${languageSpec.instruction}\n- Keep sora_prompt and full_sora_prompt in English for the video model.\n- In the JSON response, add language.spoken and language.content reflecting the resolved spoken/content language.`;
+  const languageInstruction = `\n\n语言强约束：\n- ${languageSpec.instruction}\n- Keep sora_prompt and full_sora_prompt in English for the video model.\n- If a concrete output language is selected, it overrides conflicting language in the user's raw script.\n- Do not invent subtitles, on-screen text, voiceover, or dialogue. Only fill those fields when the user explicitly asks for them; otherwise leave them empty.\n- If user-requested subtitles/voiceover are in another language, translate/localize them into the selected output language unless output language is auto.\n- In the JSON response, add language.spoken and language.content reflecting the resolved language.`;
 
   // Build instruction
   let instruction: string;
@@ -351,7 +372,9 @@ function buildDefaultPrompt(
       "scene_zh": "镜头1的中文场景描述",
       "sora_prompt": "English Sora prompt for shot 1 only",
       "duration_s": 3,
-      "camera": "close-up"
+      "camera": "close-up",
+      "voiceover": "",
+      "on_screen_text": []
     }
   ],
   "full_sora_prompt": "Complete English Sora prompt combining all shots for direct use",
@@ -363,7 +386,17 @@ function buildDefaultPrompt(
   "language": {
     "spoken": "Language used by dialogue or voiceover in the final video",
     "content": "Language used by title, caption, hashtags, and first_comment"
-  }
+  },
+  "on_screen_text": [
+    {
+      "text": "Only user-requested on-screen text, in the selected output language",
+      "shot_id": 1,
+      "position": "center",
+      "locale": "Language code of the selected output language"
+    }
+  ],
+  "pacing": "fast | medium | slow | or a concise custom pacing instruction",
+  "negative": ["Things that must not appear in the final video"]
 }`;
 
   const constraints = `要求：
@@ -373,6 +406,9 @@ function buildDefaultPrompt(
 - copy.title / caption / first_comment 必须是可直接发布的成品文案
 - caption 末尾必须附带 5-8 个标签，使用空格分隔的纯文本格式，例如：#skincare #beauty #viral
 - 标签不能带 Markdown、不能使用 ** 包裹、不能用逗号或顿号连接
+- 默认不要生成字幕、屏幕文字、旁白或台词；只有用户明确要求字幕/屏幕文字/Text on Screen/旁白/Voiceover/台词时，才填写 on_screen_text 和 shots[].voiceover / shots[].on_screen_text，否则用空数组或空字符串
+- 如果用户明确要求的字幕/旁白与手动选择的输出语言冲突，on_screen_text、shots[].voiceover、copy 和 language 字段必须翻译或本地化到手动选择的语言
+- full_sora_prompt 只在用户明确要求时包含字幕、旁白和节奏要求；结构化字幕/旁白字段为空时，不要在 full_sora_prompt 中添加字幕或旁白
 - 只输出 JSON，不要任何额外文字、代码块标记`;
 
   if (type === "video") {

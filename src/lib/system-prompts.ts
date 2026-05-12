@@ -44,7 +44,9 @@ const JSON_SCHEMA = `{
       "scene_zh": "镜头1的中文场景描述",
       "sora_prompt": "English Sora prompt for shot 1 only",
       "duration_s": 3,
-      "camera": "close-up"
+      "camera": "close-up",
+      "voiceover": "",
+      "on_screen_text": []
     }
   ],
   "full_sora_prompt": "Complete English Sora prompt combining all shots for direct use",
@@ -56,7 +58,17 @@ const JSON_SCHEMA = `{
   "language": {
     "spoken": "Language used by dialogue or voiceover in the final video",
     "content": "Language used by title, caption, hashtags, and first_comment"
-  }
+  },
+  "on_screen_text": [
+    {
+      "text": "Only user-requested on-screen text, in the selected output language",
+      "shot_id": 1,
+      "position": "center",
+      "locale": "Language code of the selected output language"
+    }
+  ],
+  "pacing": "fast | medium | slow | or a concise custom pacing instruction",
+  "negative": ["Things that must not appear in the final video"]
 }`;
 
 const SCRIPT_CONSTRAINTS = `要求：
@@ -66,6 +78,9 @@ const SCRIPT_CONSTRAINTS = `要求：
 - copy.title / caption / first_comment 必须是可直接发布的成品文案
 - caption 末尾必须附带 5-8 个标签，使用空格分隔的纯文本格式，例如：#skincare #beauty #viral
 - 标签不能带 Markdown、不能使用 ** 包裹、不能用逗号或顿号连接
+- 默认不要生成字幕、屏幕文字、旁白或台词；只有用户明确要求字幕/屏幕文字/Text on Screen/旁白/Voiceover/台词时，才填写 on_screen_text 和 shots[].voiceover / shots[].on_screen_text，否则用空数组或空字符串
+- 如果用户明确要求的字幕/旁白与手动选择的输出语言冲突，on_screen_text、shots[].voiceover、copy 和 language 字段必须翻译或本地化到手动选择的语言
+- full_sora_prompt 只在用户明确要求时包含字幕、旁白和节奏要求；结构化字幕/旁白字段为空时，不要在 full_sora_prompt 中添加字幕或旁白
 - 只输出 JSON，不要任何额外文字、代码块标记`;
 
 export const DEFAULT_SYSTEM_PROMPTS: Record<SystemPromptKey, string> = {

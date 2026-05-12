@@ -54,8 +54,8 @@ test("buildFinalVideoPrompt appends reference-product constraints to the final p
 
   assert.match(prompt, /^Cinematic product ad/);
   assert.match(prompt, /Reference image constraints/);
-  assert.match(prompt, /must stay clearly visible and prominent/);
-  assert.match(prompt, /Do not replace the product/);
+  assert.match(prompt, /Preserve its identity, packaging, colors and key details/);
+  assert.match(prompt, /do not replace the product/);
 });
 
 test("buildFinalVideoPrompt mentions multiple reference images when available", () => {
@@ -86,7 +86,7 @@ test("buildFinalVideoPrompt language block does not self-negate for English", ()
   });
 
   assert.doesNotMatch(prompt, /English, not English/);
-  assert.match(prompt, /must speak in English/);
+  assert.match(prompt, /Language: all speech, VO and baked-in text must be English/);
 });
 
 test("buildFinalVideoPrompt language block keeps non-English contrast clause", () => {
@@ -95,10 +95,39 @@ test("buildFinalVideoPrompt language block keeps non-English contrast clause", (
     outputLanguage: "ms",
   });
 
-  assert.match(prompt, /must match Malay \(Malaysia\), not English/);
+  assert.match(prompt, /Language: all speech, VO and baked-in text must be Malay \(Malaysia\), not English/);
 });
 
-test("buildFinalVideoPrompt surfaces on-screen text from script verbatim", () => {
+test("buildFinalVideoPrompt omits text blocks when script has no requested subtitles", () => {
+  const prompt = buildFinalVideoPrompt({
+    scriptPrompt: "Base",
+    outputLanguage: "en-my",
+    script: {
+      creative_points: [],
+      hook: "",
+      plot_summary: "",
+      shots: [
+        {
+          id: 1,
+          scene_zh: "",
+          sora_prompt: "",
+          duration_s: 3,
+          camera: "wide",
+          voiceover: "",
+          on_screen_text: [],
+        },
+      ],
+      full_sora_prompt: "",
+      copy: { title: "", caption: "", first_comment: "" },
+      on_screen_text: [],
+    },
+  });
+
+  assert.doesNotMatch(prompt, /Text \(/);
+  assert.doesNotMatch(prompt, /VO \(/);
+});
+
+test("buildFinalVideoPrompt surfaces explicitly requested on-screen text", () => {
   const prompt = buildFinalVideoPrompt({
     scriptPrompt: "Base",
     script: {
@@ -115,11 +144,63 @@ test("buildFinalVideoPrompt surfaces on-screen text from script verbatim", () =>
     },
   });
 
-  assert.match(prompt, /On-screen text \(verbatim/);
+  assert.match(prompt, /Text \(render exactly\)/);
   assert.match(prompt, /"PENING BAU NAJIS KUCING\?!"/);
   assert.match(prompt, /shot 1/);
   assert.match(prompt, /center-left/);
   assert.match(prompt, /"BUY NOW"/);
+});
+
+test("buildFinalVideoPrompt translates source subtitles when manual language is selected", () => {
+  const prompt = buildFinalVideoPrompt({
+    scriptPrompt: "Base",
+    outputLanguage: "en-my",
+    script: {
+      creative_points: [],
+      hook: "",
+      plot_summary: "",
+      shots: [
+        {
+          id: 1,
+          scene_zh: "",
+          sora_prompt: "",
+          duration_s: 3,
+          camera: "wide",
+          voiceover: "Haiya... banyak kucing, tapi bau dia...",
+        },
+      ],
+      full_sora_prompt: "",
+      copy: { title: "", caption: "", first_comment: "" },
+      on_screen_text: [
+        { text: "PENING BAU NAJIS KUCING?!", shot_id: 1, locale: "ms" },
+      ],
+    },
+  });
+
+  assert.match(prompt, /manual language selection overrides source text/);
+  assert.match(prompt, /Text \(Malaysian English, localize if needed\)/);
+  assert.match(prompt, /VO \(Malaysian English, localize if needed\)/);
+  assert.doesNotMatch(prompt, /verbatim/);
+  assert.doesNotMatch(prompt, /do not translate/);
+});
+
+test("buildFinalVideoPrompt keeps source subtitles verbatim in auto language mode", () => {
+  const prompt = buildFinalVideoPrompt({
+    scriptPrompt: "Base",
+    outputLanguage: "auto",
+    script: {
+      creative_points: [],
+      hook: "",
+      plot_summary: "",
+      shots: [],
+      full_sora_prompt: "",
+      copy: { title: "", caption: "", first_comment: "" },
+      on_screen_text: ["PENING BAU NAJIS KUCING?!"],
+    },
+  });
+
+  assert.match(prompt, /Text \(render exactly\)/);
+  assert.doesNotMatch(prompt, /localize if needed/);
 });
 
 test("buildFinalVideoPrompt falls back to per-shot on_screen_text when top-level missing", () => {
@@ -161,8 +242,7 @@ test("buildFinalVideoPrompt renders pacing constraints with concrete tempo", () 
       pacing: "fast",
     },
   });
-  assert.match(fast, /Pacing constraint/);
-  assert.match(fast, /under ~1\.5 seconds/);
+  assert.match(fast, /Pacing: fast, punchy cuts/);
 
   const custom = buildFinalVideoPrompt({
     scriptPrompt: "Base",
@@ -176,7 +256,7 @@ test("buildFinalVideoPrompt renders pacing constraints with concrete tempo", () 
       pacing: "前三秒强钩子",
     },
   });
-  assert.match(custom, /verbatim from user/);
+  assert.match(custom, /Pacing:/);
   assert.match(custom, /前三秒强钩子/);
 });
 
@@ -203,10 +283,9 @@ test("buildFinalVideoPrompt renders voiceovers and negatives when present", () =
     },
   });
 
-  assert.match(prompt, /Spoken lines \(verbatim/);
+  assert.match(prompt, /VO \(speak exactly\)/);
   assert.match(prompt, /"Haiya, banyak kucing"/);
-  assert.match(prompt, /Negative constraints/);
-  assert.match(prompt, /- no other brands/);
+  assert.match(prompt, /Avoid: no other brands; no English voiceover/);
 });
 
 test("buildFinalVideoPrompt without script behaves identically to legacy callers", () => {

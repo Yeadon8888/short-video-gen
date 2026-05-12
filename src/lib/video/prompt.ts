@@ -98,23 +98,8 @@ function isEnglishFamily(label: string): boolean {
 }
 
 function buildLanguageBlock(languageLabel: string): string {
-  const lines = [
-    `Spoken-language constraint:`,
-    `- Every character on screen must speak in ${languageLabel}.`,
-    `- Any voiceover, narration, or subtitles baked into the video must be in ${languageLabel}.`,
-  ];
-  if (isEnglishFamily(languageLabel)) {
-    lines.push(
-      `- Lip-sync, mouth shapes, and pronunciation must match ${languageLabel}.`,
-      `- Do not switch to another language, even for product names or catchphrases, unless the user explicitly requested mixed language.`,
-    );
-  } else {
-    lines.push(
-      `- Lip-sync, mouth shapes, and pronunciation must match ${languageLabel}, not English.`,
-      `- Do not switch to English or any other language, even for product names or catchphrases, unless the user explicitly requested mixed language.`,
-    );
-  }
-  return lines.join("\n");
+  const contrast = isEnglishFamily(languageLabel) ? "" : ", not English";
+  return `Language: all speech, VO and baked-in text must be ${languageLabel}${contrast}; manual language selection overrides source text.`;
 }
 
 function buildReferenceBlock(params: {
@@ -131,14 +116,7 @@ function buildReferenceBlock(params: {
       }),
     );
   }
-  return [
-    firstLine,
-    "- Keep the same product identity, category, packaging, silhouette, materials, colors, label details, and other defining visual traits from the reference image(s).",
-    "- If the reference video conflicts with the reference image(s), preserve the product from the reference image(s) and only borrow pacing, composition, or storytelling from the video.",
-    "- The product from the reference image(s) must stay clearly visible and prominent in the hero shots and key scenes.",
-    "- Do not replace the product with another product, package, logo, or brand variation.",
-    "- Build the generated video around showcasing that exact product while following the requested creative direction.",
-  ].join("\n");
+  return `${firstLine} Preserve its identity, packaging, colors and key details; use source video only for pacing/style; do not replace the product.`;
 }
 
 function formatOnScreenTextLine(item: OnScreenTextItem): string {
@@ -150,53 +128,62 @@ function formatOnScreenTextLine(item: OnScreenTextItem): string {
   return `- "${item.text}"${meta}`;
 }
 
-function buildOnScreenTextBlock(items: OnScreenTextItem[]): string {
+function buildOnScreenTextBlock(params: {
+  items: OnScreenTextItem[];
+  languageLabel?: string;
+  languageOverride?: boolean;
+}): string {
+  if (params.languageLabel && params.languageOverride) {
+    return [
+      `Text (${params.languageLabel}, localize if needed):`,
+      ...params.items.map(formatOnScreenTextLine),
+    ].join("\n");
+  }
+
   return [
-    "On-screen text (verbatim, do not translate, render exactly as written):",
-    ...items.map(formatOnScreenTextLine),
+    "Text (render exactly):",
+    ...params.items.map(formatOnScreenTextLine),
   ].join("\n");
 }
 
-function buildVoiceoverBlock(items: Array<{ shotId?: number; text: string }>): string {
+function formatVoiceoverLine({ shotId, text }: { shotId?: number; text: string }): string {
+  return shotId !== undefined ? `- shot ${shotId}: "${text}"` : `- "${text}"`;
+}
+
+function buildVoiceoverBlock(params: {
+  items: Array<{ shotId?: number; text: string }>;
+  languageLabel?: string;
+  languageOverride?: boolean;
+}): string {
+  if (params.languageLabel && params.languageOverride) {
+    return [
+      `VO (${params.languageLabel}, localize if needed):`,
+      ...params.items.map(formatVoiceoverLine),
+    ].join("\n");
+  }
+
   return [
-    "Spoken lines (verbatim, do not translate, must be heard in the audio):",
-    ...items.map(({ shotId, text }) =>
-      shotId !== undefined ? `- shot ${shotId}: "${text}"` : `- "${text}"`,
-    ),
+    "VO (speak exactly):",
+    ...params.items.map(formatVoiceoverLine),
   ].join("\n");
 }
 
 function buildPacingBlock(pacing: string): string {
   const normalized = pacing.trim().toLowerCase();
   if (normalized === "fast") {
-    return [
-      "Pacing constraint: snappy, fast-cut tempo.",
-      "- Each shot transition under ~1.5 seconds; cuts should feel punchy.",
-      "- Camera energy should be kinetic — handheld, whip-pans, or quick zooms are acceptable.",
-      "- Do not let any single shot linger in static framing.",
-    ].join("\n");
+    return "Pacing: fast, punchy cuts; avoid lingering static shots.";
   }
   if (normalized === "slow") {
-    return [
-      "Pacing constraint: slow, cinematic tempo.",
-      "- Hold each shot for at least 2.5 seconds; cuts should feel deliberate.",
-      "- Smooth, tripod-stable camera motion preferred.",
-    ].join("\n");
+    return "Pacing: slow, cinematic, deliberate holds.";
   }
   if (normalized === "medium") {
-    return "Pacing constraint: medium-paced, balanced cuts (~2 seconds per shot).";
+    return "Pacing: medium, balanced cuts.";
   }
-  return [
-    "Pacing constraint (verbatim from user):",
-    `- ${pacing.trim()}`,
-  ].join("\n");
+  return `Pacing: ${pacing.trim()}`;
 }
 
 function buildNegativeBlock(items: string[]): string {
-  return [
-    "Negative constraints (must NOT appear in the video):",
-    ...items.map((item) => `- ${item}`),
-  ].join("\n");
+  return `Avoid: ${items.join("; ")}`;
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -305,10 +292,22 @@ function renderInvariantSections(invariants: RenderingInvariants): string[] {
     );
   }
   if (invariants.onScreenText?.length) {
-    sections.push(buildOnScreenTextBlock(invariants.onScreenText));
+    sections.push(
+      buildOnScreenTextBlock({
+        items: invariants.onScreenText,
+        languageLabel: invariants.languageLabel,
+        languageOverride: invariants.languageOverride,
+      }),
+    );
   }
   if (invariants.voiceovers?.length) {
-    sections.push(buildVoiceoverBlock(invariants.voiceovers));
+    sections.push(
+      buildVoiceoverBlock({
+        items: invariants.voiceovers,
+        languageLabel: invariants.languageLabel,
+        languageOverride: invariants.languageOverride,
+      }),
+    );
   }
   if (invariants.pacing) {
     sections.push(buildPacingBlock(invariants.pacing));
@@ -330,9 +329,12 @@ export function buildFinalVideoPrompt(params: {
   const basePrompt = normalizePrompt(params.scriptPrompt);
   const referenceImageCount = params.referenceImageCount ?? 0;
   const languageLabel = videoLanguageLabel(params.outputLanguage);
+  const languageOverride =
+    typeof params.outputLanguage === "string" && params.outputLanguage !== "auto";
 
   const invariants: RenderingInvariants = {
     languageLabel: languageLabel || undefined,
+    languageOverride,
     reference:
       referenceImageCount > 0
         ? {
