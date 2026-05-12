@@ -35,6 +35,14 @@ function normalizeScheduledDuration(value: unknown): VideoDuration {
 export const SCHEDULED_BATCH_LIMIT = 20;
 
 /**
+ * 候选池 overpull 倍数：fetch 多于 budget 的候选，让 fairness 重排有材料。
+ * 取 max(budget*2, fairnessCap + budget) 保证即使单用户队列很深，
+ * 也能拉到至少一个其他用户的候选（前提：其他用户最老任务在前 fairnessCap+budget 名内）。
+ */
+const FAIRNESS_OVERPULL = (budget: number, fairnessCap: number) =>
+  Math.max(budget * 2, fairnessCap + budget);
+
+/**
  * 推进所有"到点的"和"ASAP 排队的" scheduled 任务。
  *
  * 两种语义共享 status='scheduled':
@@ -93,7 +101,7 @@ export async function processDueScheduledTasks(options?: {
         ),
       )
       .orderBy(asc(tasks.createdAt))
-      .limit(budget * 5); // pull more than budget to allow fairness reordering
+      .limit(FAIRNESS_OVERPULL(budget, GROK_PER_USER_FAIRNESS_CAP));
 
     const pickedIds = pickQueueDrainCandidates(candidates, {
       budget,
@@ -141,7 +149,17 @@ export async function processDueScheduledTasks(options?: {
   }
 
   // ─── 提交 (parallel fan-out, 复用 stagger) ─────────────────────────────
-  const allClaimed = [...dueScheduled, ...asapPicked];
+  // 用显式 tag 区分两个分支：
+  //   - Branch A (due-time): 还没 claim，需要 UPDATE 抢
+  //   - Branch B (ASAP):     事务里已 claim 过，不能再抢一次（否则双 claim）
+  type ClaimEntry = {
+    task: typeof tasks.$inferSelect;
+    alreadyClaimed: boolean;
+  };
+  const allClaimed: ClaimEntry[] = [
+    ...dueScheduled.map((t) => ({ task: t, alreadyClaimed: false })),
+    ...asapPicked.map((t) => ({ task: t, alreadyClaimed: true })),
+  ];
   if (allClaimed.length === 0) return { processed: 0, total: 0, errors: [] };
 
   let processed = 0;
@@ -149,11 +167,10 @@ export async function processDueScheduledTasks(options?: {
 
   // dueScheduled 路径仍然要 atomic claim（老逻辑），ASAP 路径已经在事务里 claim 过。
   const results = await Promise.allSettled(
-    allClaimed.map(async (task, index) => {
+    allClaimed.map(async ({ task, alreadyClaimed }, index) => {
       // 老路径任务还没有 atomic claim，需要重新 claim 一遍
       let claimedTask = task;
-      const needsClaim = task.scheduledAt !== null; // due-time 路径
-      if (needsClaim) {
+      if (!alreadyClaimed) {
         const [c] = await db
           .update(tasks)
           .set({ status: "generating", scheduledAt: null, errorMessage: null })
