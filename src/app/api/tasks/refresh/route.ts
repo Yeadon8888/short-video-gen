@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { taskGroups, tasks } from "@/lib/db/schema";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 
 /**
  * GET /api/tasks/refresh
@@ -26,7 +26,43 @@ export async function GET() {
   const { user } = authResult;
 
   const userTasks = await db
-    .select()
+    .select({
+      id: tasks.id,
+      userId: tasks.userId,
+      taskGroupId: tasks.taskGroupId,
+      type: tasks.type,
+      status: tasks.status,
+      modelId: tasks.modelId,
+      inputText: tasks.inputText,
+      videoSourceUrl: tasks.videoSourceUrl,
+      soraPrompt: tasks.soraPrompt,
+      scriptJson: tasks.scriptJson,
+      resultUrls: tasks.resultUrls,
+      resultAssetKeys: tasks.resultAssetKeys,
+      creditsCost: tasks.creditsCost,
+      paramsJson: tasks.paramsJson,
+      errorMessage: tasks.errorMessage,
+      scheduledAt: tasks.scheduledAt,
+      createdAt: tasks.createdAt,
+      completedAt: tasks.completedAt,
+      fulfillmentMode: tasks.fulfillmentMode,
+      requestedCount: tasks.requestedCount,
+      successfulCount: tasks.successfulCount,
+      startedAt: tasks.startedAt,
+      deliveryDeadlineAt: tasks.deliveryDeadlineAt,
+      // NEW: queue position (only meaningful for ASAP-queued scheduled tasks
+      // where scheduledAt IS NULL). Counts earlier-queued tasks targeting the
+      // same model — each provider queue is independent.
+      queueAhead: sql<number>`
+        CASE WHEN ${tasks.status} = 'scheduled' AND ${tasks.scheduledAt} IS NULL
+          THEN (SELECT COUNT(*)::int FROM ${tasks} t2
+                WHERE t2.status = 'scheduled' AND t2.scheduled_at IS NULL
+                  AND t2.model_id = ${tasks.modelId}
+                  AND t2.created_at < ${tasks.createdAt})
+          ELSE 0
+        END
+      `.as("queue_ahead"),
+    })
     .from(tasks)
     .where(and(eq(tasks.userId, user.id), isNull(tasks.taskGroupId)))
     .orderBy(desc(tasks.createdAt))

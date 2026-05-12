@@ -17,9 +17,11 @@ import { TaskZipDownloadButton } from "@/components/tasks/TaskZipDownloadButton"
 
 const POLL_INTERVAL = 15_000; // 15 seconds
 const ACTIVE_STATUSES = ["pending", "analyzing", "generating", "polling"];
+/** Task augmented with the queue-position field returned by /api/tasks/refresh */
+type TaskWithQueue = Task & { queueAhead?: number };
 type TimelineItem =
   | { kind: "group"; createdAt: string | Date; id: string; group: TaskGroup }
-  | { kind: "task"; createdAt: string | Date; id: string; task: Task };
+  | { kind: "task"; createdAt: string | Date; id: string; task: TaskWithQueue };
 
 function formatScheduledAt(value: string | Date | null | undefined): string | null {
   if (!value) return null;
@@ -56,10 +58,10 @@ export function TaskList({
   initialTasks,
   initialTaskGroups,
 }: {
-  initialTasks: Task[];
+  initialTasks: TaskWithQueue[];
   initialTaskGroups: TaskGroup[];
 }) {
-  const [taskList, setTaskList] = useState<Task[]>(initialTasks);
+  const [taskList, setTaskList] = useState<TaskWithQueue[]>(initialTasks);
   const [taskGroups, setTaskGroups] = useState<TaskGroup[]>(initialTaskGroups);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const taskListRef = useRef(taskList);
@@ -264,10 +266,16 @@ export function TaskList({
                   </span>
                 </div>
 
-                {task.status === "scheduled" && task.scheduledAt && (
-                  <p className="mt-2 text-xs text-purple-300/90">
-                    预计执行：北京时间 {formatScheduledAt(task.scheduledAt)}
-                  </p>
+                {task.status === "scheduled" && (
+                  task.scheduledAt ? (
+                    <p className="mt-2 text-xs text-purple-300/90">
+                      预计执行：北京时间 {formatScheduledAt(task.scheduledAt)}
+                    </p>
+                  ) : (
+                    <p className="mt-2 text-xs text-purple-300/90">
+                      排队中，前面还有 {task.queueAhead ?? 0} 个，预计 {Math.max(1, Math.ceil((task.queueAhead ?? 0) / 4))} 分钟
+                    </p>
+                  )
                 )}
 
                 {task.inputText && (
