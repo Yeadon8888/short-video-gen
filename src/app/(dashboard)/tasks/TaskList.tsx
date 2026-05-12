@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Download, Clock, CheckCircle, XCircle, Loader2, AlertTriangle, CalendarClock } from "lucide-react";
-import type { Task, TaskGroup } from "@/lib/db/schema";
+import { Clock, CheckCircle, XCircle, Loader2, AlertTriangle, CalendarClock } from "lucide-react";
 import type { TaskParamsSnapshot } from "@/lib/video/types";
+import type { TaskListGroup, TaskListTask } from "@/lib/tasks/list-projection";
 import {
   getDaysUntilVideoExpiry,
   shouldShowVideoExpiryCountdown,
@@ -18,8 +18,8 @@ import { TaskZipDownloadButton } from "@/components/tasks/TaskZipDownloadButton"
 const POLL_INTERVAL = 15_000; // 15 seconds
 const ACTIVE_STATUSES = ["pending", "analyzing", "generating", "polling"];
 type TimelineItem =
-  | { kind: "group"; createdAt: string | Date; id: string; group: TaskGroup }
-  | { kind: "task"; createdAt: string | Date; id: string; task: Task };
+  | { kind: "group"; createdAt: string | Date; id: string; group: TaskListGroup }
+  | { kind: "task"; createdAt: string | Date; id: string; task: TaskListTask };
 
 function formatScheduledAt(value: string | Date | null | undefined): string | null {
   if (!value) return null;
@@ -56,14 +56,20 @@ export function TaskList({
   initialTasks,
   initialTaskGroups,
 }: {
-  initialTasks: Task[];
-  initialTaskGroups: TaskGroup[];
+  initialTasks: TaskListTask[];
+  initialTaskGroups: TaskListGroup[];
 }) {
-  const [taskList, setTaskList] = useState<Task[]>(initialTasks);
-  const [taskGroups, setTaskGroups] = useState<TaskGroup[]>(initialTaskGroups);
+  const [taskList, setTaskList] = useState<TaskListTask[]>(initialTasks);
+  const [taskGroups, setTaskGroups] = useState<TaskListGroup[]>(initialTaskGroups);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const taskListRef = useRef(taskList);
   const taskGroupRef = useRef(taskGroups);
+  const hasActive = useMemo(
+    () =>
+      taskList.some((task) => ACTIVE_STATUSES.includes(task.status)) ||
+      taskGroups.some((group) => ACTIVE_STATUSES.includes(group.status)),
+    [taskGroups, taskList],
+  );
 
   useEffect(() => {
     taskListRef.current = taskList;
@@ -87,14 +93,11 @@ export function TaskList({
 
   // Stable refresh function via ref — no dependency on taskList
   useEffect(() => {
-    const hasActive =
-      taskList.some((t) => ACTIVE_STATUSES.includes(t.status)) ||
-      taskGroups.some((group) => ACTIVE_STATUSES.includes(group.status));
-
     if (hasActive && !timerRef.current) {
       const refresh = async () => {
         const currentTasks = taskListRef.current;
         const currentGroups = taskGroupRef.current;
+        if (document.visibilityState === "hidden") return;
         if (
           !currentTasks.some((t) => ACTIVE_STATUSES.includes(t.status)) &&
           !currentGroups.some((group) => ACTIVE_STATUSES.includes(group.status))
@@ -124,7 +127,7 @@ export function TaskList({
         timerRef.current = null;
       }
     };
-  }, [taskGroups, taskList]);
+  }, [hasActive]);
 
   if (taskList.length === 0 && taskGroups.length === 0) {
     return (
@@ -210,13 +213,12 @@ export function TaskList({
             const { task } = item;
             const cfg = statusConfig[task.status] ?? statusConfig.pending;
             const Icon = cfg.icon;
-            const resultUrls = (task.resultUrls as string[]) ?? [];
             const taskVideoSummary =
               (task.paramsJson as TaskParamsSnapshot | null)?.sourceMode === "batch"
                 ? summarizeBatchTaskVideos({
                     status: task.status,
                     requestedCount: task.requestedCount,
-                    resultUrls,
+                    successCount: task.resultUrlCount,
                     paramsJson: task.paramsJson as {
                       count?: number;
                       batchUnitsPerProduct?: number;
@@ -224,7 +226,7 @@ export function TaskList({
                   })
                 : {
                     plannedCount: ((task.paramsJson as { count?: number } | null)?.count ?? 1),
-                    successCount: resultUrls.length,
+                    successCount: task.resultUrlCount,
                   };
 
             return (
@@ -259,7 +261,7 @@ export function TaskList({
                     {new Date(task.createdAt).toLocaleString("zh-CN")}
                     {shouldShowVideoExpiryCountdown({
                       status: task.status,
-                      successCount: resultUrls.length,
+                      successCount: task.resultUrlCount,
                     }) && renderExpiryCountdown(task.createdAt)}
                   </span>
                 </div>
@@ -289,27 +291,9 @@ export function TaskList({
                   </Link>
                   <TaskZipDownloadButton
                     taskId={task.id}
-                    disabled={resultUrls.length === 0}
+                    disabled={task.resultUrlCount === 0}
                   />
                 </div>
-
-                {resultUrls.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {resultUrls.map((url, i) => (
-                      <a
-                        key={i}
-                        href={url}
-                        download
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 rounded-[var(--vc-radius-md)] border border-[var(--vc-border)] px-2 py-1 text-xs text-[var(--vc-text-secondary)] transition-colors hover:bg-white/[0.04] hover:text-white"
-                      >
-                        <Download className="h-3 w-3" />
-                        {task.type === "scene_gen" ? `图片 ${i + 1}` : `视频 ${i + 1}`}
-                      </a>
-                    ))}
-                  </div>
-                )}
               </div>
             );
           })}

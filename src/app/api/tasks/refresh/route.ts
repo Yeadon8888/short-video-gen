@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { taskGroups, tasks } from "@/lib/db/schema";
+import {
+  taskListGroupColumns,
+  taskListTaskColumns,
+} from "@/lib/tasks/list-projection";
 import { and, desc, eq, isNull } from "drizzle-orm";
 
 /**
@@ -26,14 +30,14 @@ export async function GET() {
   const { user } = authResult;
 
   const userTasks = await db
-    .select()
+    .select(taskListTaskColumns)
     .from(tasks)
     .where(and(eq(tasks.userId, user.id), isNull(tasks.taskGroupId)))
     .orderBy(desc(tasks.createdAt))
     .limit(50);
 
   const userTaskGroups = await db
-    .select()
+    .select(taskListGroupColumns)
     .from(taskGroups)
     .where(eq(taskGroups.userId, user.id))
     .orderBy(desc(taskGroups.createdAt))

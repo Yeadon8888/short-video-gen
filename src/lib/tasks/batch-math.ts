@@ -52,6 +52,7 @@ export function resolveBatchUnitsPerProduct(
 export interface BatchTaskProgressSnapshot {
   status: string;
   requestedCount?: number | null;
+  successCount?: number | null;
   resultUrls?: string[] | null;
   paramsJson?: BatchUnitsSnapshot | null;
 }
@@ -68,7 +69,7 @@ export function getBatchTaskPlannedVideoCount(
 
 export function summarizeBatchTaskVideos(task: BatchTaskProgressSnapshot) {
   const plannedCount = getBatchTaskPlannedVideoCount(task);
-  const successCount = task.resultUrls?.length ?? 0;
+  const successCount = task.successCount ?? task.resultUrls?.length ?? 0;
   const isActive = ACTIVE_BATCH_TASK_STATUSES.has(task.status);
   const failedCount = isActive ? 0 : Math.max(0, plannedCount - successCount);
 

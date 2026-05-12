@@ -3,6 +3,10 @@ export const dynamic = "force-dynamic";
 import { db } from "@/lib/db";
 import { taskGroups, tasks } from "@/lib/db/schema";
 import { requireAuth } from "@/lib/auth";
+import {
+  taskListGroupColumns,
+  taskListTaskColumns,
+} from "@/lib/tasks/list-projection";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { TaskList } from "./TaskList";
 
@@ -12,14 +16,14 @@ export default async function TasksPage() {
   const user = auth.user;
 
   const userTasks = await db
-    .select()
+    .select(taskListTaskColumns)
     .from(tasks)
     .where(and(eq(tasks.userId, user.id), isNull(tasks.taskGroupId)))
     .orderBy(desc(tasks.createdAt))
     .limit(50);
 
   const userTaskGroups = await db
-    .select()
+    .select(taskListGroupColumns)
     .from(taskGroups)
     .where(eq(taskGroups.userId, user.id))
     .orderBy(desc(taskGroups.createdAt))
