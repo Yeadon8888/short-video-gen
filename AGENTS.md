@@ -164,6 +164,7 @@ npm run db:studio
 ## Editing Guidance For Agents
 
 - Treat billing, refunds, and task-state transitions as high risk
+- Before performance, cost, reliability, architecture, or deployment optimization work, read `docs/optimization-log.md`; after shipping a meaningful optimization, add a short entry there.
 - If touching generation lifecycle logic, inspect:
   - `src/app/api/generate/status/route.ts`
   - `src/app/api/tasks/refresh/route.ts`
