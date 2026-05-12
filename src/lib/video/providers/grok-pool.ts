@@ -34,12 +34,12 @@ export interface PickerOptions {
 }
 
 export function pickQueueDrainCandidates(
-  tasks: QueuedTaskRef[],
+  candidates: QueuedTaskRef[],
   opts: PickerOptions,
 ): string[] {
   const userCounters = new Map<string, number>();
   // 标注每条任务"在自己用户队列中的位次" (FIFO)
-  const sortedByFifo = [...tasks].sort(
+  const sortedByFifo = [...candidates].sort(
     (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
   );
   const annotated = sortedByFifo.map((t) => {
