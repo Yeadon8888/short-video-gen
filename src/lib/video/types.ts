@@ -1,4 +1,4 @@
-export type VideoDuration = 4 | 5 | 6 | 8 | 10 | 15;
+export type VideoDuration = 4 | 5 | 6 | 8 | 10 | 12 | 15;
 
 // ─── Video generation types ───
 
@@ -74,10 +74,9 @@ export interface ScriptResult {
     content?: string;
   };
   /**
-   * Hard requirements extracted from user input. Pass through to the final
-   * video prompt verbatim — do not paraphrase. Surfaced as separate sections
-   * in `buildFinalVideoPrompt` so providers see them as constraints, not
-   * descriptions Gemini already absorbed.
+   * Explicit user-requested text/audio requirements. They are surfaced as
+   * compact sections in `buildFinalVideoPrompt` so providers see them as
+   * constraints, not descriptions Gemini already absorbed.
    */
   on_screen_text?: Array<OnScreenTextItem | string>;
   pacing?: string;
@@ -91,6 +90,7 @@ export interface ScriptResult {
  */
 export interface RenderingInvariants {
   languageLabel?: string;
+  languageOverride?: boolean;
   reference?: { count: number; templateOverride?: string };
   onScreenText?: OnScreenTextItem[];
   pacing?: string;

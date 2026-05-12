@@ -15,6 +15,7 @@ function isVideoDuration(value: unknown): value is VideoDuration {
     value === 6 ||
     value === 8 ||
     value === 10 ||
+    value === 12 ||
     value === 15
   );
 }
