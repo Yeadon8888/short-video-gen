@@ -122,6 +122,9 @@ function parseForm(form: ModelFormState): {
 
 type DurationToken = ModelDefaultParamsEditorState["allowedDurations"][number];
 
+type FilterAll = "__all__";
+type StatusFilter = "all" | "active" | "inactive";
+
 export default function AdminModelsPage() {
   const [modelList, setModels] = useState<Model[]>([]);
   const [loading, setLoading] = useState(true);
@@ -130,6 +133,12 @@ export default function AdminModelsPage() {
   const [form, setForm] = useState<ModelFormState>(EMPTY_FORM);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // ─── Filters ───────────────────────────────────────────────────────────
+  const [providerFilter, setProviderFilter] = useState<string | FilterAll>("__all__");
+  const [capabilityFilter, setCapabilityFilter] = useState<ModelCapability | FilterAll>("__all__");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [searchText, setSearchText] = useState("");
 
   const fetchModels = useCallback(async () => {
     setLoading(true);
@@ -269,6 +278,40 @@ export default function AdminModelsPage() {
     [form.paramsEditor],
   );
 
+  // ─── Filtering ─────────────────────────────────────────────────────────
+  const uniqueProviders = useMemo(() => {
+    const set = new Set<string>();
+    for (const m of modelList) if (m.provider) set.add(m.provider);
+    return Array.from(set).sort();
+  }, [modelList]);
+
+  const filteredModels = useMemo(() => {
+    const q = searchText.trim().toLowerCase();
+    return modelList.filter((m) => {
+      if (providerFilter !== "__all__" && m.provider !== providerFilter) return false;
+      if (capabilityFilter !== "__all__" && m.capability !== capabilityFilter) return false;
+      if (statusFilter === "active" && !m.isActive) return false;
+      if (statusFilter === "inactive" && m.isActive) return false;
+      if (q && !m.name.toLowerCase().includes(q) && !m.slug.toLowerCase().includes(q)) {
+        return false;
+      }
+      return true;
+    });
+  }, [modelList, providerFilter, capabilityFilter, statusFilter, searchText]);
+
+  const hasActiveFilter =
+    providerFilter !== "__all__" ||
+    capabilityFilter !== "__all__" ||
+    statusFilter !== "all" ||
+    searchText.trim() !== "";
+
+  function clearFilters() {
+    setProviderFilter("__all__");
+    setCapabilityFilter("__all__");
+    setStatusFilter("all");
+    setSearchText("");
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -280,7 +323,9 @@ export default function AdminModelsPage() {
 
       <div className="flex items-center justify-between">
         <span className="text-sm text-[var(--vc-text-muted)]">
-          共 {modelList.length} 个模型配置
+          {hasActiveFilter
+            ? `已筛选 ${filteredModels.length} / ${modelList.length} 个模型`
+            : `共 ${modelList.length} 个模型配置`}
         </span>
         <button
           onClick={openCreate}
@@ -288,6 +333,80 @@ export default function AdminModelsPage() {
         >
           + 新增模型
         </button>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-3 rounded-[var(--vc-radius-md)] border border-[var(--vc-border)] bg-[var(--vc-bg-surface)] px-3 py-2.5">
+        <div className="min-w-[160px] flex-1">
+          <label className="block text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+            搜索
+          </label>
+          <input
+            type="text"
+            placeholder="名称或 slug"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            className="mt-1 w-full rounded-md border border-[var(--vc-border)] bg-[var(--vc-bg-root)] px-2.5 py-1.5 text-sm text-white outline-none focus:border-[var(--vc-accent)] placeholder-zinc-600"
+          />
+        </div>
+
+        <div className="min-w-[140px]">
+          <label className="block text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+            服务商
+          </label>
+          <select
+            value={providerFilter}
+            onChange={(e) => setProviderFilter(e.target.value as string | FilterAll)}
+            className="mt-1 w-full rounded-md border border-[var(--vc-border)] bg-[var(--vc-bg-root)] px-2.5 py-1.5 text-sm text-white outline-none focus:border-[var(--vc-accent)]"
+          >
+            <option value="__all__">全部 ({uniqueProviders.length})</option>
+            {uniqueProviders.map((p) => (
+              <option key={p} value={p}>
+                {p} ({modelList.filter((m) => m.provider === p).length})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="min-w-[120px]">
+          <label className="block text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+            能力
+          </label>
+          <select
+            value={capabilityFilter}
+            onChange={(e) => setCapabilityFilter(e.target.value as ModelCapability | FilterAll)}
+            className="mt-1 w-full rounded-md border border-[var(--vc-border)] bg-[var(--vc-bg-root)] px-2.5 py-1.5 text-sm text-white outline-none focus:border-[var(--vc-accent)]"
+          >
+            <option value="__all__">全部</option>
+            <option value={MODEL_CAPABILITIES.videoGeneration}>视频生成</option>
+            <option value={MODEL_CAPABILITIES.imageEdit}>图片编辑</option>
+            <option value={MODEL_CAPABILITIES.scriptGeneration}>脚本分析</option>
+          </select>
+        </div>
+
+        <div className="min-w-[100px]">
+          <label className="block text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+            状态
+          </label>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+            className="mt-1 w-full rounded-md border border-[var(--vc-border)] bg-[var(--vc-bg-root)] px-2.5 py-1.5 text-sm text-white outline-none focus:border-[var(--vc-accent)]"
+          >
+            <option value="all">全部</option>
+            <option value="active">仅启用</option>
+            <option value="inactive">仅停用</option>
+          </select>
+        </div>
+
+        {hasActiveFilter && (
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="rounded-md border border-[var(--vc-border)] px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:border-zinc-500 hover:text-white"
+          >
+            清除筛选
+          </button>
+        )}
       </div>
 
       <div className="overflow-x-auto rounded-[var(--vc-radius-lg)] border border-[var(--vc-border)]">
@@ -313,14 +432,16 @@ export default function AdminModelsPage() {
                   加载中...
                 </td>
               </tr>
-            ) : modelList.length === 0 ? (
+            ) : filteredModels.length === 0 ? (
               <tr>
                 <td colSpan={10} className="px-4 py-8 text-center text-[var(--vc-text-muted)]">
-                  暂无模型配置，请添加
+                  {modelList.length === 0
+                    ? "暂无模型配置，请添加"
+                    : "没有符合筛选条件的模型"}
                 </td>
               </tr>
             ) : (
-              modelList.map((model) => (
+              filteredModels.map((model) => (
                 <tr key={model.id} className="transition-colors hover:bg-white/[0.02]">
                   <td className="px-4 py-3 text-white">{model.name}</td>
                   <td className="px-4 py-3 font-mono text-zinc-300">{model.slug}</td>
