@@ -35,6 +35,17 @@ test("friendlyFailMessage falls back gracefully on unknown errors", () => {
   assert.match(friendly, /生成失败|联系管理员|退款/);
 });
 
+test("friendlyFailMessage maps 'Video upstream returned 429' to rate-limit hint", () => {
+  const friendly = friendlyFailMessage("Video upstream returned 429");
+  assert.match(friendly, /繁忙|限流|稍后重试/);
+  assert.doesNotMatch(friendly, /429|upstream/);
+});
+
+test("friendlyFailMessage maps nfvid 'Stream idle timeout after 60.0s' to rate-limit hint", () => {
+  const friendly = friendlyFailMessage("Stream idle timeout after 60.0s");
+  assert.match(friendly, /繁忙|稍后重试/);
+});
+
 test("friendlyFailMessage never leaks raw HTTP status codes or stack frames", () => {
   const raw = "TypeError: Cannot read property 'foo' of undefined\n    at /app/whatever.js:42:13";
   const friendly = friendlyFailMessage(raw);

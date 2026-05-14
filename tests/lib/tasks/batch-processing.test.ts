@@ -86,3 +86,23 @@ test("non-grok batch child tasks keep their configured fulfillment mode", () => 
     "standard",
   );
 });
+
+test("nfvid grok-imagine batch tasks also force backfill (same flaky upstream as grok2api)", () => {
+  assert.equal(
+    resolveBatchTaskFulfillmentMode(
+      { taskGroupId: "group-1", fulfillmentMode: "standard" },
+      { provider: "nfvid", slug: "grok-imagine-video-frames" },
+    ),
+    "backfill_until_target",
+  );
+});
+
+test("nfvid sora2 (non-grok-imagine) keeps standard mode in batch", () => {
+  assert.equal(
+    resolveBatchTaskFulfillmentMode(
+      { taskGroupId: "group-1", fulfillmentMode: "standard" },
+      { provider: "nfvid", slug: "sora2-pro-12s-9x16" },
+    ),
+    "standard",
+  );
+});

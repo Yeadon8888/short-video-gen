@@ -24,11 +24,24 @@ export function resolveBatchTaskVideoCount(taskParams: TaskParamsSnapshot): numb
   return resolveBatchUnitsPerProduct(taskParams);
 }
 
+/**
+ * Provider × slug 列表：这些上游偶发故障率高（429 / stream timeout / GPU 任务丢失），
+ * 必须用 backfill_until_target 模式 —— 失败 slot 自动重试，目标 count 达成即可。
+ *
+ * - grok2api: Railway 上的 chenyme/grok2api 代理；同步链路偶发 429
+ * - nfvid + grok-imagine-*: 转 Grok 上游，跟 grok2api 是同一个 Grok 后端，问题一样
+ */
+function isFlakyUpstream(provider: string | undefined, slug: string | undefined): boolean {
+  if (provider === "grok2api") return true;
+  if (provider === "nfvid" && slug?.startsWith("grok-imagine-")) return true;
+  return false;
+}
+
 export function resolveBatchTaskFulfillmentMode(
   task: { taskGroupId: string | null; fulfillmentMode: FulfillmentMode },
-  model: { provider: string } | null | undefined,
+  model: { provider: string; slug?: string } | null | undefined,
 ): FulfillmentMode {
-  if (task.taskGroupId && model?.provider === "grok2api") {
+  if (task.taskGroupId && isFlakyUpstream(model?.provider, model?.slug)) {
     return "backfill_until_target";
   }
 

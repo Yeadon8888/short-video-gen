@@ -61,7 +61,12 @@ export function classifyVideoProviderFailure(failReason: string): {
     msg.includes("too many requests") ||
     msg.includes("try again later") ||
     msg.includes("temporarily unavailable") ||
-    msg.includes("负载已饱和")
+    msg.includes("负载已饱和") ||
+    // 上游 429 各种文案：grok2api / nfvid 都会把 Grok 的 429 包成 "returned 429" 之类
+    /\b429\b/.test(msg) ||
+    msg.includes("returned 429") ||
+    msg.includes("upstream 429") ||
+    msg.includes("stream idle timeout")   // nfvid 的 60s stream timeout 也是瞬态拥塞
   ) {
     return { retryable: true, terminalClass: "provider_error" };
   }
@@ -205,9 +210,13 @@ export function friendlyFailMessage(rawMessage: string): string {
     msg.includes("rate limit") ||
     msg.includes("too many requests") ||
     msg.includes("负载已饱和") ||
-    msg.includes("temporarily unavailable")
+    msg.includes("temporarily unavailable") ||
+    /\b429\b/.test(msg) ||
+    msg.includes("returned 429") ||
+    msg.includes("upstream 429") ||
+    msg.includes("stream idle timeout")
   ) {
-    return "服务繁忙，已自动退款，请稍后重试。";
+    return "上游服务繁忙（限流或临时拥塞），已自动退款，请稍后重试。";
   }
 
   // ── 超时 ──
