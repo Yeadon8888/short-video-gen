@@ -133,3 +133,71 @@ Tests use Node.js built-in `node:test` + `node:assert/strict`. No external test 
 - **Do not `git push` from the outer `/Users/yeadon_1/Desktop/MyProject/自动带货短视频/` workspace** — it shares this repo's GitHub remote, and a push from there will overwrite `main`. Touch workspace-level files from their own context only.
 - `/api/health` is deliberately minimal (liveness only). Do not extend it to return env-var presence, connection-string hints, or error bodies — that was a past security finding.
 - `postgres.js` + `Date` inside raw `sql\`\`` templates throws `ERR_INVALID_ARG_TYPE` in the Vercel runtime. Use `toISOString() + ::timestamptz` or drizzle operators (`lt(col, date)`) instead.
+
+---
+
+## 通用编码原则（Karpathy guidelines）
+
+减少 LLM 常见编码错误的行为准则。**偏向谨慎而非速度**——琐碎任务（拼写、单行修复）请自行判断。
+来源：[forrestchang/andrej-karpathy-skills](https://github.com/forrestchang/andrej-karpathy-skills)
+
+### 1. 编码前先思考
+
+**不要假设。不要藏起困惑。把权衡摆出来。**
+
+动手实现之前：
+- 明说假设。不确定就问。
+- 有多种解读时，全部呈现——不要默默选一个。
+- 如果存在更简单的方法，说出来；该反驳就反驳。
+- 哪里不清楚就停下来。指出哪里模糊，问清楚。
+
+### 2. 简洁优先
+
+**用解决问题所需的最少代码。不做投机性扩展。**
+
+- 没问你的功能，不要加。
+- 一次性代码不抽象。
+- 没要求的"灵活性 / 可配置"不要加。
+- 不可能发生的场景，不写错误处理。
+- 200 行能压到 50 行，就重写。
+
+**自检**："资深工程师看了会觉得过度复杂吗？" —— 是 → 简化。
+
+### 3. 精准修改
+
+**只动该动的。只清理你自己制造的混乱。**
+
+改动既有代码时：
+- 不要"顺手改"相邻代码、注释、格式化。
+- 不要重构没坏的东西。
+- 匹配现有风格——即使你更倾向另一种写法。
+- 发现无关的死代码 → 提一句，**不要删**。
+
+当你的改动产生孤儿代码时：
+- 删掉**你的改动**导致没人用的 import / 变量 / 函数。
+- 已经存在的死代码不要顺手删——除非用户要求。
+
+**自检**：每一行变更都应该能直接对应回用户的需求。
+
+### 4. 目标驱动执行
+
+**先定义成功标准。循环到验证通过。**
+
+把指令式任务翻译成可验证目标：
+- "加一下校验" → "为非法输入写测试，让它们通过"
+- "修一下 bug" → "先写复现测试，让它通过"
+- "重构 X" → "保证重构前后测试都通过"
+
+多步任务先说一个简短计划：
+
+```
+1. [步骤] → 验证：[检查点]
+2. [步骤] → 验证：[检查点]
+3. [步骤] → 验证：[检查点]
+```
+
+强成功标准 → 你能独立 loop 到完成。弱标准（"让它能跑"）→ 反复需要澄清。
+
+---
+
+**这些原则在生效的信号**：diff 里没有多余改动、不再因为过度复杂被重写、澄清问题在动手前问出来而不是踩坑后才补。
