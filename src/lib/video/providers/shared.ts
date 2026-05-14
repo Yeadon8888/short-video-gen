@@ -66,7 +66,13 @@ export function classifyVideoProviderFailure(failReason: string): {
     /\b429\b/.test(msg) ||
     msg.includes("returned 429") ||
     msg.includes("upstream 429") ||
-    msg.includes("stream idle timeout")   // nfvid 的 60s stream timeout 也是瞬态拥塞
+    msg.includes("stream idle timeout") ||  // nfvid 的 60s stream timeout 也是瞬态拥塞
+    // nfvid 的输出质量守门：Grok 上游偶尔会"缩水"返回 400x736 等低分辨率视频，
+    // nfvid 检测到后会拒绝。这是瞬态质量问题，重试可能就好。
+    msg.includes("low resolution video") ||
+    msg.includes("blocked width") ||
+    msg.includes("blocked height") ||
+    msg.includes("video generation returned low")
   ) {
     return { retryable: true, terminalClass: "provider_error" };
   }
@@ -202,6 +208,17 @@ export function friendlyFailMessage(rawMessage: string): string {
     msg.includes("limit exceeded")
   ) {
     return "账户余额或配额不足，请充值或联系客服。";
+  }
+
+  // ── 上游低分辨率回退 (Grok 偶发"缩水"输出 + nfvid 守门拒绝) ──
+  // 必须放在限流之前，因为低分辨率不算"繁忙"，是质量问题
+  if (
+    msg.includes("low resolution video") ||
+    msg.includes("blocked width") ||
+    msg.includes("blocked height") ||
+    msg.includes("video generation returned low")
+  ) {
+    return "上游生成的视频质量不达标（分辨率过低，已被自动过滤），已自动退款。这是上游偶发问题，请重新提交即可。";
   }
 
   // ── 限流 / 频率受限 ──

@@ -35,6 +35,13 @@ test("friendlyFailMessage falls back gracefully on unknown errors", () => {
   assert.match(friendly, /生成失败|联系管理员|退款/);
 });
 
+test("friendlyFailMessage maps nfvid low-resolution rejection to quality hint", () => {
+  const raw = "Video generation returned low resolution video: 400x736 (blocked width 400)";
+  const friendly = friendlyFailMessage(raw);
+  assert.match(friendly, /质量不达标|分辨率/);
+  assert.doesNotMatch(friendly, /400x736|blocked|low resolution/);
+});
+
 test("friendlyFailMessage maps 'Video upstream returned 429' to rate-limit hint", () => {
   const friendly = friendlyFailMessage("Video upstream returned 429");
   assert.match(friendly, /繁忙|限流|稍后重试/);
