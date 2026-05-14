@@ -45,6 +45,18 @@ function getApiKey(model: VideoModelRecord): string {
   ).trim();
 }
 
+/**
+ * Marker error: response was a definitive HTTP failure (e.g. 400/401/403/404)
+ * that should NOT be retried. Without this marker the outer catch would treat
+ * it like a transient network failure and burn 9s on pointless retries.
+ */
+class NfvidNonRetryableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NfvidNonRetryableError";
+  }
+}
+
 async function apiRequest<T>(params: {
   model: VideoModelRecord;
   method: "GET" | "POST";
@@ -89,12 +101,17 @@ async function apiRequest<T>(params: {
           await new Promise((resolve) => setTimeout(resolve, 15_000 * (attempt + 1)));
           continue;
         }
-        throw new Error(`HTTP ${response.status}: ${message}`);
+        throw new NfvidNonRetryableError(`HTTP ${response.status}: ${message}`);
       }
 
       return payload as T;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
+      // Definitively non-retryable response error — bail out, do not waste
+      // retry budget on the same 400/401/403 etc.
+      if (error instanceof NfvidNonRetryableError) {
+        throw error;
+      }
       if (attempt < 2) {
         await new Promise((resolve) => setTimeout(resolve, 3_000 * (attempt + 1)));
         continue;
@@ -179,12 +196,35 @@ export const nfvidProvider: VideoProviderAdapter = {
   },
 
   async queryTaskStatus({ model, taskId }): Promise<TaskStatusResult> {
-    const result = await apiRequest<NfvidStatusResponse>({
-      model,
-      method: "GET",
-      path: `${NFVID_VIDEOS_ENDPOINT}/${encodeURIComponent(taskId)}`,
-      timeoutMs: 60_000,
-    });
+    let result: NfvidStatusResponse;
+    try {
+      result = await apiRequest<NfvidStatusResponse>({
+        model,
+        method: "GET",
+        path: `${NFVID_VIDEOS_ENDPOINT}/${encodeURIComponent(taskId)}`,
+        timeoutMs: 60_000,
+      });
+    } catch (error) {
+      // 上游偶尔会"丢任务"——nfvid → OpenAI Sora 链路里，超时未交付的任务会被
+      // 上游清理。后续 GET /v1/videos/{id} 返回 HTTP 400 {"code":"task_not_exist"}。
+      // 这是终态：上游已无记录、无法重试。直接报 FAILED 让 runner 退款。
+      const message = error instanceof Error ? error.message : String(error);
+      if (
+        /HTTP\s+400/i.test(message) &&
+        /task[_\s-]?not[_\s-]?(exist|found)/i.test(message)
+      ) {
+        return {
+          taskId,
+          status: "FAILED",
+          progress: "0%",
+          failReason:
+            "上游任务记录已丢失（task_not_exist）—— 通常是 nfvid → OpenAI Sora 链路里 GPU 任务超时被丢弃，自动退款",
+          retryable: false,
+          terminalClass: "provider_error",
+        };
+      }
+      throw error;
+    }
 
     const status = extractNfvidStatus(result);
     const progress = normalizeNfvidProgress(result.progress ?? result.data?.progress);

@@ -151,6 +151,37 @@ test("nfvidProvider returns content endpoint fallback for successful tasks", asy
   }
 });
 
+test("nfvidProvider treats HTTP 400 task_not_exist as terminal non-retryable failure", async () => {
+  const originalFetch = globalThis.fetch;
+  let fetchCount = 0;
+
+  globalThis.fetch = (async () => {
+    fetchCount += 1;
+    return new Response(
+      JSON.stringify({ code: "task_not_exist", message: "task_not_exist", data: null }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }) as typeof fetch;
+
+  try {
+    const result = await nfvidProvider.queryTaskStatus({
+      model: baseModel,
+      taskId: "task_gone",
+    });
+
+    // Upstream lost the task — runner should mark failed + refund.
+    assert.equal(result.status, "FAILED");
+    assert.equal(result.retryable, false);
+    assert.equal(result.terminalClass, "provider_error");
+    assert.match(result.failReason ?? "", /task_not_exist|丢失/);
+    // Must NOT retry — HTTP 400 with task_not_exist is definitively terminal.
+    // (Bug: previous code retried 3 times with 3+6=9s wait before bailing.)
+    assert.equal(fetchCount, 1, "should not retry non-retryable 400 responses");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("nfvidProvider classifies failed status response", async () => {
   const originalFetch = globalThis.fetch;
 
