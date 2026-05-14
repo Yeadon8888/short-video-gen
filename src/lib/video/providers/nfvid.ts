@@ -1,10 +1,11 @@
 import type {
+  ProviderCreateResult,
   VideoModelRecord,
   VideoProviderAdapter,
 } from "@/lib/video/service";
 import type { TaskStatusResult } from "@/lib/video/types";
 import { delayStaggeredSubmission } from "@/lib/tasks/batch-queue";
-import { uploadSharedVideo } from "@/lib/storage/gateway";
+import { isUploadGatewayEnabled, uploadSharedVideo } from "@/lib/storage/gateway";
 import {
   extractNfvidFailReason,
   extractNfvidStatus,
@@ -12,10 +13,12 @@ import {
   extractNfvidVideoUrl,
   inferNfvidCapabilities,
   NFVID_ACTIVE_STATES,
+  NFVID_CHAT_ENDPOINT,
   NFVID_DEFAULT_BASE_URL,
   NFVID_FAILURE_STATES,
   NFVID_SUCCESS_STATES,
   NFVID_VIDEOS_ENDPOINT,
+  nfvidUsesSyncChat,
   normalizeNfvidBaseUrl,
   normalizeNfvidProgress,
   type NfvidCreateResponse,
@@ -149,6 +152,102 @@ async function rehostTaskContent(params: {
   }
 }
 
+/**
+ * 同步路径下 chat-completions 直接返回视频 URL，把它镜像到 R2 让 URL 持久化、
+ * 不依赖 nfvid CDN 长期可用性。URL 本身公网可下，无需 Bearer（已验证）。
+ */
+async function rehostSyncChatUrl(params: {
+  upstreamUrl: string;
+  fallbackName: string;
+}): Promise<string> {
+  if (!isUploadGatewayEnabled()) return params.upstreamUrl;
+  try {
+    const fileRes = await fetch(params.upstreamUrl, {
+      signal: AbortSignal.timeout(180_000),
+    });
+    if (!fileRes.ok) return params.upstreamUrl;
+    const buffer = await fileRes.arrayBuffer();
+    const stored = await uploadSharedVideo({
+      bucket: "nfvid",
+      filename: `${params.fallbackName}.mp4`,
+      data: buffer,
+      contentType: fileRes.headers.get("content-type") ?? "video/mp4",
+    });
+    return stored.url;
+  } catch {
+    return params.upstreamUrl;
+  }
+}
+
+/**
+ * Synchronous chat-completions path —— 用于 nfvid 上的 Grok-lineage 模型
+ * （比如 grok-imagine-video-frames）。
+ *
+ * 行为跟 grok2api Railway 代理的 chat-completions 一致：阻塞 ~55s，视频 URL
+ * 出现在 choices[0].message.content。createTasks 必须自带 immediateResults
+ * 标记 SUCCESS，让 runner 跳过轮询。
+ */
+async function createViaSyncChat(params: {
+  model: VideoModelRecord;
+  prompt: string;
+  imageUrls: string[];
+  count: number;
+  providerOptions: Record<string, unknown>;
+}): Promise<ProviderCreateResult> {
+  const taskIds: string[] = [];
+  const immediateResults: TaskStatusResult[] = [];
+
+  for (let index = 0; index < params.count; index += 1) {
+    await delayStaggeredSubmission(index);
+    const imageUrl = params.imageUrls[index] ?? params.imageUrls[0];
+    const content: unknown[] = [{ type: "text", text: params.prompt }];
+    if (imageUrl) {
+      content.push({ type: "image_url", image_url: { url: imageUrl } });
+    }
+
+    const payload = {
+      ...params.providerOptions,
+      model: params.model.slug,
+      stream: false,
+      messages: [{ role: "user", content }],
+    };
+
+    const result = await apiRequest<{
+      id?: string;
+      choices?: Array<{ message?: { content?: string } }>;
+    }>({
+      model: params.model,
+      method: "POST",
+      path: NFVID_CHAT_ENDPOINT,
+      body: payload,
+      timeoutMs: 240_000,
+    });
+
+    const url = result?.choices?.[0]?.message?.content?.trim();
+    if (!url || !/^https?:\/\//.test(url)) {
+      throw new Error(
+        `NFVid sync chat returned no video URL: ${JSON.stringify(result).slice(0, 300)}`,
+      );
+    }
+    const chatId = result.id ?? `nfvid-chat-${Date.now()}-${index}`;
+
+    const finalUrl = await rehostSyncChatUrl({
+      upstreamUrl: url,
+      fallbackName: `${chatId}`,
+    });
+
+    taskIds.push(chatId);
+    immediateResults.push({
+      taskId: chatId,
+      status: "SUCCESS",
+      progress: "100%",
+      url: finalUrl,
+    });
+  }
+
+  return { providerTaskIds: taskIds, immediateResults };
+}
+
 export const nfvidProvider: VideoProviderAdapter = {
   id: "nfvid",
 
@@ -158,6 +257,19 @@ export const nfvidProvider: VideoProviderAdapter = {
 
   async createTasks({ model, params }) {
     const providerOptions = params.providerOptions ?? {};
+
+    // Dispatch on slug: Grok-lineage models on nfvid use synchronous
+    // chat-completions; everything else uses async /v1/videos.
+    if (nfvidUsesSyncChat(model.slug)) {
+      return createViaSyncChat({
+        model,
+        prompt: params.prompt,
+        imageUrls: params.imageUrls ?? [],
+        count: params.count,
+        providerOptions,
+      });
+    }
+
     const group = typeof providerOptions.group === "string" ? providerOptions.group : "vip";
     const stream = typeof providerOptions.stream === "boolean" ? providerOptions.stream : false;
     const taskIds: string[] = [];

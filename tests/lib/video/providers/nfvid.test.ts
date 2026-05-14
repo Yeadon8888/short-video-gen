@@ -182,6 +182,104 @@ test("nfvidProvider treats HTTP 400 task_not_exist as terminal non-retryable fai
   }
 });
 
+test("nfvidProvider sync-chat dispatch: grok-imagine-video-frames uses /v1/chat/completions and returns immediate SUCCESS", async () => {
+  const originalFetch = globalThis.fetch;
+  let chatHits = 0;
+  let videosHits = 0;
+  let rehostHits = 0;
+
+  globalThis.fetch = (async (input) => {
+    const url = String(input);
+    if (url.endsWith("/v1/chat/completions")) {
+      chatHits += 1;
+      return new Response(
+        JSON.stringify({
+          id: "chatcmpl-abc123",
+          choices: [{
+            message: {
+              role: "assistant",
+              content: "https://cos.nfvid.vip/win/videos/test.mp4",
+            },
+          }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (url.endsWith("/v1/videos")) {
+      videosHits += 1;
+      return new Response(JSON.stringify({ id: "should_not_be_hit" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (url === "https://cos.nfvid.vip/win/videos/test.mp4") {
+      rehostHits += 1;
+      // rehost fetch — return a tiny mp4 buffer
+      return new Response(new Uint8Array([0, 0, 0, 1]), {
+        status: 200,
+        headers: { "Content-Type": "video/mp4" },
+      });
+    }
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    const result = await nfvidProvider.createTasks({
+      model: {
+        ...baseModel,
+        slug: "grok-imagine-video-frames",
+        name: "Grok Imagine Video Frames",
+      },
+      params: {
+        prompt: "animate this product",
+        imageUrls: ["https://cdn.example/product.png"],
+        orientation: "portrait",
+        duration: 10,
+        count: 1,
+        model: "grok-imagine-video-frames",
+      },
+    });
+
+    assert.equal(chatHits, 1, "should hit chat-completions endpoint");
+    assert.equal(videosHits, 0, "should NOT hit /v1/videos for sync-chat model");
+    assert.deepEqual(result.providerTaskIds, ["chatcmpl-abc123"]);
+    assert.ok(result.immediateResults, "sync path must return immediateResults");
+    assert.equal(result.immediateResults?.length, 1);
+    assert.equal(result.immediateResults?.[0].status, "SUCCESS");
+    assert.equal(result.immediateResults?.[0].progress, "100%");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("nfvidProvider sync-chat: missing URL in response throws clear error", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({ id: "chatcmpl-x", choices: [{ message: { content: "" } }] }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    )) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      nfvidProvider.createTasks({
+        model: { ...baseModel, slug: "grok-imagine-video-frames" },
+        params: {
+          prompt: "test",
+          imageUrls: ["https://cdn.example/a.png"],
+          orientation: "portrait",
+          duration: 10,
+          count: 1,
+          model: "grok-imagine-video-frames",
+        },
+      }),
+      /returned no video URL/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("nfvidProvider classifies failed status response", async () => {
   const originalFetch = globalThis.fetch;
 

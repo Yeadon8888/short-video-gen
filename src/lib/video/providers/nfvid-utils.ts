@@ -6,9 +6,28 @@ import type { VideoDuration } from "@/lib/video/types";
 
 export const NFVID_DEFAULT_BASE_URL = "https://api.nfvid.vip";
 export const NFVID_VIDEOS_ENDPOINT = "/v1/videos";
+export const NFVID_CHAT_ENDPOINT = "/v1/chat/completions";
 export const NFVID_SUCCESS_STATES = new Set(["SUCCESS", "SUCCEEDED", "COMPLETED", "DONE"]);
 export const NFVID_FAILURE_STATES = new Set(["FAILED", "FAILURE", "ERROR", "CANCELLED", "CANCELED"]);
 export const NFVID_ACTIVE_STATES = new Set(["PENDING", "QUEUED", "PROCESSING", "RUNNING", "IN_PROGRESS"]);
+
+/**
+ * 部分 nfvid 模型走同步 chat-completions 而非异步 /v1/videos：
+ * - 调用 POST /v1/chat/completions
+ * - 阻塞等待 ~55s
+ * - 视频 URL 在 choices[0].message.content
+ *
+ * 跟 Railway 上 chenyme/grok2api 走的是同一套 OpenAI-compat 协议（这些都是
+ * 把 Grok Imagine 包装成 chat 的产物），但 nfvid 是独立账号、独立配额，
+ * 不能把它跟 grok2api 池容量算到一起。
+ */
+export const NFVID_SYNC_CHAT_MODELS = new Set<string>([
+  "grok-imagine-video-frames",
+]);
+
+export function nfvidUsesSyncChat(slug: string): boolean {
+  return NFVID_SYNC_CHAT_MODELS.has(slug);
+}
 
 const VALID_DURATIONS = new Set<VideoDuration>([4, 5, 6, 8, 10, 12, 15]);
 
