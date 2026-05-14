@@ -129,6 +129,108 @@ export function isRetryableOverload(status: number, message: string): boolean {
   );
 }
 
+/**
+ * 把原始上游错误翻译成 **用户能看懂、不泄露技术细节** 的中文提示。
+ *
+ * 原则：
+ * - 关键的"业务原因"必须传达（如：图片含真人、内容违规、配额不足）
+ * - 技术细节（HTTP 状态码、JSON 结构、内部账号余额数字、上游错误码）一律剥掉
+ * - 退款/重试的承诺要明确，让用户知道下一步怎么办
+ *
+ * 原始错误请同时 `console.error` 写入日志，方便我们排查；这里返回的只是给
+ * 终端用户看的版本。
+ */
+export function friendlyFailMessage(rawMessage: string): string {
+  const msg = (rawMessage || "").toLowerCase();
+
+  // ── 隐私 / 真人图（最具体，先判 — Volcengine Seedance 这条最常见）──
+  if (
+    msg.includes("inputimagesensitivecontentdetected") ||
+    msg.includes("privacyinformation") ||
+    msg.includes("may contain real person") ||
+    msg.includes("real person") ||
+    msg.includes("contain person") ||
+    msg.includes("face detected") ||
+    msg.includes("人脸") ||
+    msg.includes("真人") ||
+    msg.includes("人像")
+  ) {
+    return "图片中检测到真人或隐私内容，无法生成。请使用纯产品图、卡通形象或不含真实人像的图片重试。";
+  }
+
+  // ── 上游 / 服务商配额不足（隔离用户的金额数字，导回管理员） ──
+  if (
+    msg.includes("insuficient_user_quota") ||
+    msg.includes("insufficient_user_quota") ||
+    msg.includes("insufficient_quota") ||
+    msg.includes("预扣费额度") ||
+    msg.includes("剩余额度") ||
+    msg.includes("user_quota")
+  ) {
+    return "当前模型服务额度不足，请联系管理员处理后再试。";
+  }
+
+  // ── 内容违规（不含真人那条，但 prompt 敏感词等）──
+  if (
+    msg.includes("prominent_people") ||
+    msg.includes("content policy") ||
+    msg.includes("content_unsafe") ||
+    msg.includes("safety") ||
+    msg.includes("unsafe") ||
+    msg.includes("sensitive") ||
+    msg.includes("内容敏感") ||
+    msg.includes("提示词敏感") ||
+    msg.includes("敏感词") ||
+    msg.includes("违规") ||
+    msg.includes("审核") ||
+    msg.includes("not allowed to generate") ||
+    msg.includes("prompt blocked")
+  ) {
+    return "提示词或图片涉敏感/违规内容，请调整描述或换张图片重试。";
+  }
+
+  // ── 余额 / 限额（用户层面的余额不足）──
+  if (
+    msg.includes("余额不足") ||
+    msg.includes("insufficient balance") ||
+    msg.includes("quota") ||
+    msg.includes("limit exceeded")
+  ) {
+    return "账户余额或配额不足，请充值或联系客服。";
+  }
+
+  // ── 限流 / 频率受限 ──
+  if (
+    msg.includes("频率受限") ||
+    msg.includes("rate limit") ||
+    msg.includes("too many requests") ||
+    msg.includes("负载已饱和") ||
+    msg.includes("temporarily unavailable")
+  ) {
+    return "服务繁忙，已自动退款，请稍后重试。";
+  }
+
+  // ── 超时 ──
+  if (msg.includes("timeout") || msg.includes("timed out") || msg.includes("超时")) {
+    return "生成超时，已自动退款，请稍后重试。";
+  }
+
+  // ── 上游通用错误兜底 ──
+  if (
+    msg.includes("upstream") ||
+    msg.includes("server error") ||
+    msg.includes("internal") ||
+    msg.includes("provider") ||
+    /\bhttp\s+[45]\d\d\b/i.test(msg) ||
+    msg.includes("invalid_request_error")
+  ) {
+    return "上游服务返回错误，已自动退款，请稍后重试。如多次失败请联系管理员。";
+  }
+
+  // ── 最终兜底：完全不认识的错误 ──
+  return "生成失败，已自动退款，请稍后重试或联系管理员。";
+}
+
 export function extractVideoUrlFromPayload(result: Record<string, unknown>): string | undefined {
   const data = result.data;
   if (data && typeof data === "object") {

@@ -212,12 +212,18 @@ export async function processDueScheduledTasks(options?: {
         });
         processed += 1;
       } catch (e) {
-        errors.push(`Task ${claimedTask.id}: ${String(e).slice(0, 200)}`);
+        const rawError = String(e);
+        console.error(
+          `[scheduled-drain] task=${claimedTask.id} 失败:`,
+          rawError.slice(0, 1000),
+        );
+        errors.push(`Task ${claimedTask.id}: ${rawError.slice(0, 200)}`);
+        const { friendlyFailMessage } = await import("@/lib/video/providers/shared");
         await failTaskAndRefund({
           taskId: claimedTask.id,
           userId: claimedTask.userId,
           refundAmount: claimedTask.creditsCost,
-          errorMessage: String(e).slice(0, 500),
+          errorMessage: friendlyFailMessage(rawError),
           refundReason: "队列任务提交失败自动退款",
           allowedStatuses: ["analyzing", "generating"],
         });

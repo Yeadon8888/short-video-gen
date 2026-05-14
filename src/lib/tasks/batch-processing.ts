@@ -263,11 +263,19 @@ export async function processPendingBatchTasks(params: {
 
         return "processed" as const;
       } catch (error) {
+        const rawError = String(error);
+        // 原始上游错误进日志，保留排查能力
+        console.error(
+          `[batch-processing] task=${claimedTask.id} 失败:`,
+          rawError.slice(0, 1000),
+        );
+        // 用户层只看友好提示，不暴露 HTTP 状态码 / JSON / 内部账号余额
+        const { friendlyFailMessage } = await import("@/lib/video/providers/shared");
         await failTaskAndRefund({
           taskId: claimedTask.id,
           userId: claimedTask.userId,
           refundAmount: claimedTask.creditsCost,
-          errorMessage: String(error).slice(0, 500),
+          errorMessage: friendlyFailMessage(rawError),
           refundReason: "批量任务处理失败自动退款",
           allowedStatuses: ["pending", "analyzing", "generating", "polling"],
         });
