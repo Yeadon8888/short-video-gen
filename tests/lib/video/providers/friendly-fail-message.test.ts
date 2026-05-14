@@ -35,6 +35,13 @@ test("friendlyFailMessage falls back gracefully on unknown errors", () => {
   assert.match(friendly, /生成失败|联系管理员|退款/);
 });
 
+test("friendlyFailMessage maps nfvid 'video not found' to upstream-not-delivered hint", () => {
+  const raw = "Video 'video_d748d63786d1421b90f9fdca6488a240' not found";
+  const friendly = friendlyFailMessage(raw);
+  assert.match(friendly, /上游|未交付|未生成|稍后重试/);
+  assert.doesNotMatch(friendly, /video_d748|invalid_request|video_id/);
+});
+
 test("friendlyFailMessage maps nfvid low-resolution rejection to quality hint", () => {
   const raw = "Video generation returned low resolution video: 400x736 (blocked width 400)";
   const friendly = friendlyFailMessage(raw);

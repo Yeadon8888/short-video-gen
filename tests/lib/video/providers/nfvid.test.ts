@@ -361,6 +361,36 @@ test("nfvidProvider grok-form: missing image throws clear error", async () => {
   }
 });
 
+test("nfvidProvider: HTTP 200 body with top-level error treated as FAILED (not stuck at UNKNOWN)", async () => {
+  // nfvid 偶发：HTTP 200，body 是 {"error":{...},"id":"..."}——任务记录建了
+  // 但实际视频没生成。之前 extractNfvidStatus 看不见 error，永远 UNKNOWN polling。
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        id: "task_stuck",
+        error: {
+          code: "invalid_value",
+          message: "Video 'video_abc123' not found",
+          param: "video_id",
+          type: "invalid_request_error",
+        },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    )) as typeof fetch;
+
+  try {
+    const result = await nfvidProvider.queryTaskStatus({
+      model: baseModel,
+      taskId: "task_stuck",
+    });
+    assert.equal(result.status, "FAILED", "must be FAILED, not UNKNOWN");
+    assert.match(result.failReason ?? "", /not found|video/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("nfvidProvider classifies failed status response", async () => {
   const originalFetch = globalThis.fetch;
 

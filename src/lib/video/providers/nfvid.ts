@@ -367,6 +367,29 @@ export const nfvidProvider: VideoProviderAdapter = {
       throw error;
     }
 
+    // nfvid 偶发会以 HTTP 200 返回 body {"error":{...},"id":"..."} 的形态——
+    // 任务记录存在但上游 Grok 那条链路没真正生成视频。比如：
+    //   {"error":{"code":"invalid_value","message":"Video 'video_xxx' not found",
+    //     "param":"video_id","type":"invalid_request_error"}, "id":"task_..."}
+    // 之前 extractNfvidStatus 看不见这个 error 字段，会返回 "UNKNOWN" 一直 poll。
+    // 这里在 status 提取前先拦一下，识别到 error 形态就报终态失败让 runner 退款。
+    if (result.error && typeof result.error === "object") {
+      const errObj = result.error as { code?: string; message?: string };
+      const failReason =
+        errObj.message ||
+        errObj.code ||
+        "上游返回了错误形态响应";
+      const { retryable, terminalClass } = classifyVideoProviderFailure(failReason);
+      return {
+        taskId,
+        status: "FAILED",
+        progress: "0%",
+        failReason,
+        retryable,
+        terminalClass,
+      };
+    }
+
     const status = extractNfvidStatus(result);
     const progress = normalizeNfvidProgress(result.progress ?? result.data?.progress);
 

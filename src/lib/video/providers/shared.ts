@@ -210,6 +210,16 @@ export function friendlyFailMessage(rawMessage: string): string {
     return "账户余额或配额不足，请充值或联系客服。";
   }
 
+  // ── 上游"任务存在但视频未生成"——nfvid 链路偶发故障 ──
+  // 必须放在 invalid_request_error 类前面，否则会被通用上游错误吞掉
+  if (
+    /video[^a-z]*not found/i.test(msg) ||
+    /video_id[^a-z]*not found/i.test(msg) ||
+    msg.includes("'video_") && msg.includes("not found")
+  ) {
+    return "上游服务暂未交付视频（任务记录已建立但视频未生成），已自动退款。这是上游偶发故障，请稍后重试或换个模型。";
+  }
+
   // ── 上游低分辨率回退 (Grok 偶发"缩水"输出 + nfvid 守门拒绝) ──
   // 必须放在限流之前，因为低分辨率不算"繁忙"，是质量问题
   if (
