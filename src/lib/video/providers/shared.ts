@@ -14,99 +14,242 @@ export function toGrokRatio(
   return orientation === "portrait" ? "2:3" : "3:2";
 }
 
+/**
+ * 上游错误模式表 —— **classifier 和 friendlyFailMessage 唯一的真相源**。
+ *
+ * 设计目标：把"什么算这类错误（matchers）"、"是否可重试（retryable）"、
+ * "对内归类（terminalClass）"、"对用户说什么（friendly）"四件事捆在一起，
+ * 避免两个函数维护两份关键字列表导致漂移（历史上添加新上游错误时漏一边的 bug）。
+ *
+ * 顺序敏感：从最具体到最通用，第一个匹配即胜出。新增条目时优先放到合适的
+ * 具体层级里，**不要**直接追加到末尾。
+ */
+type ErrorPattern = {
+  /** 唯一名（便于检索、日志、未来 metrics 分桶）*/
+  id: string;
+  /** 匹配器：小写子串 或 RegExp。任意一个命中算这条规则匹配。*/
+  matchers: ReadonlyArray<string | RegExp>;
+  retryable: boolean;
+  terminalClass: TerminalClass;
+  /** 给终端用户看的中文版（已脱敏的）*/
+  friendly: string;
+};
+
+const UPSTREAM_GENERIC_FRIENDLY =
+  "上游服务返回错误，已自动退款，请稍后重试。如多次失败请联系管理员。";
+
+const UPSTREAM_ERROR_PATTERNS: ReadonlyArray<ErrorPattern> = [
+  // ── 1. 真人 / 隐私图（最具体，先判 — Volcengine Seedance 这条最常见）──
+  {
+    id: "real_person",
+    matchers: [
+      "inputimagesensitivecontentdetected",
+      "privacyinformation",
+      "may contain real person",
+      "real person",
+      "contain person",
+      "face detected",
+      "人脸",
+      "真人",
+      "人像",
+    ],
+    retryable: false,
+    terminalClass: "content_policy",
+    friendly:
+      "图片中检测到真人或隐私内容，无法生成。请使用纯产品图、卡通形象或不含真实人像的图片重试。",
+  },
+
+  // ── 2. 上游 B2B 配额不足（隔离用户的金额数字，导回管理员）──
+  // 这一类**必须** non-retryable —— 重试 5 次也不会变出额度，只是浪费上游调用。
+  {
+    id: "b2b_quota_exhausted",
+    matchers: [
+      "insuficient_user_quota", // 上游 302.ai 的 typo
+      "insufficient_user_quota",
+      "insufficient_quota",
+      "insufficient quota",
+      "user_quota",
+      "预扣费额度",
+      "剩余额度",
+    ],
+    retryable: false,
+    terminalClass: "quota_exceeded",
+    friendly: "当前模型服务额度不足，请联系管理员处理后再试。",
+  },
+
+  // ── 3. 内容违规（不含真人那条，但 prompt 敏感词 / 审核失败等）──
+  {
+    id: "content_policy",
+    matchers: [
+      "prominent_people",
+      "content policy",
+      "content_unsafe",
+      "video_unsafe",
+      "safety",
+      "unsafe",
+      "sensitive",
+      "sensitive prompt",
+      "sensitive word",
+      "sensitive words",
+      "not allowed to generate",
+      "generation not allowed",
+      "not permitted to generate",
+      "prompt blocked",
+      "prompt rejected",
+      "内容敏感",
+      "提示词敏感",
+      "敏感词",
+      "不允许生成",
+      "禁止生成",
+      "违规",
+      "审核",
+    ],
+    retryable: false,
+    terminalClass: "content_policy",
+    friendly: "提示词或图片涉敏感/违规内容，请调整描述或换张图片重试。",
+  },
+
+  // ── 4. invalid_request_error / 图片尺寸不匹配 等"参数级"上游错误 ──
+  // 这一类重试无意义（参数本身错的，下次发还是错的）。
+  {
+    id: "invalid_request",
+    matchers: [
+      "inpaint image must match",
+      "invalid_request_error",
+      "image dimensions",
+      "image size mismatch",
+    ],
+    retryable: false,
+    terminalClass: "provider_error",
+    friendly: UPSTREAM_GENERIC_FRIENDLY,
+  },
+
+  // ── 5. 用户层余额 / 配额 ──
+  {
+    id: "user_balance",
+    matchers: [
+      "余额不足",
+      "insufficient balance",
+      "quota",
+      "limit exceeded",
+    ],
+    retryable: false,
+    terminalClass: "quota_exceeded",
+    friendly: "账户余额或配额不足，请充值或联系客服。",
+  },
+
+  // ── 6. 上游"任务存在但视频未生成"——nfvid 链路偶发故障 ──
+  // 必须放在 generic upstream 前面，否则会被 invalid_request_error / upstream 吞掉
+  {
+    id: "video_not_found",
+    matchers: [
+      /video[^a-z]*not found/i,
+      /video_id[^a-z]*not found/i,
+      /'video_[a-z0-9]+'.*not found/i,
+    ],
+    retryable: true,
+    terminalClass: "provider_error",
+    friendly:
+      "上游服务暂未交付视频（任务记录已建立但视频未生成），已自动退款。这是上游偶发故障，请稍后重试或换个模型。",
+  },
+
+  // ── 7. 上游低分辨率回退（Grok 偶发"缩水"输出 + nfvid 守门拒绝）──
+  // 必须放在限流之前，因为低分辨率不算"繁忙"，是质量问题
+  {
+    id: "low_resolution",
+    matchers: [
+      "low resolution video",
+      "blocked width",
+      "blocked height",
+      "video generation returned low",
+    ],
+    retryable: true,
+    terminalClass: "provider_error",
+    friendly:
+      "上游生成的视频质量不达标（分辨率过低，已被自动过滤），已自动退款。这是上游偶发问题，请重新提交即可。",
+  },
+
+  // ── 8. 限流 / 频率受限 ──
+  // 注意 "stream idle timeout" 字面含 "timeout" 但语义是 nfvid 60s 上游空闲断连，
+  // 必须先于通用 timeout 匹配。
+  {
+    id: "rate_limit",
+    matchers: [
+      "频率受限",
+      "账号频率受限",
+      "rate limit",
+      "too many requests",
+      "try again later",
+      "temporarily unavailable",
+      "负载已饱和",
+      /\b429\b/,
+      "returned 429",
+      "upstream 429",
+      "stream idle timeout",
+    ],
+    retryable: true,
+    terminalClass: "provider_error",
+    friendly: "上游服务繁忙（限流或临时拥塞），已自动退款，请稍后重试。",
+  },
+
+  // ── 9. 超时 ──
+  {
+    id: "timeout",
+    matchers: ["timeout", "timed out", "超时"],
+    retryable: true,
+    terminalClass: "timeout",
+    friendly: "生成超时，已自动退款，请稍后重试。",
+  },
+
+  // ── 10. 通用上游错误兜底（服务器 5xx / 4xx / internal / upstream / provider）──
+  {
+    id: "upstream_generic",
+    matchers: [
+      "upstream",
+      "server error",
+      "internal",
+      "500",
+      "服务器",
+      "provider",
+      "upstream error",
+      /\bhttp\s+[45]\d\d\b/i,
+    ],
+    retryable: true,
+    terminalClass: "provider_error",
+    friendly: UPSTREAM_GENERIC_FRIENDLY,
+  },
+];
+
+/** 完全不认识时的最终兜底：保守可重试，让 retry-policy 用 attempts 上限收口。*/
+const UNKNOWN_FALLBACK = {
+  retryable: true,
+  terminalClass: "unknown" as TerminalClass,
+  friendly: "生成失败，已自动退款，请稍后重试或联系管理员。",
+} as const;
+
+function matchUpstreamErrorPattern(rawMessage: string): ErrorPattern | null {
+  const msg = (rawMessage || "").toLowerCase();
+  for (const pattern of UPSTREAM_ERROR_PATTERNS) {
+    for (const m of pattern.matchers) {
+      const hit = typeof m === "string" ? msg.includes(m) : m.test(msg);
+      if (hit) return pattern;
+    }
+  }
+  return null;
+}
+
 export function classifyVideoProviderFailure(failReason: string): {
   retryable: boolean;
   terminalClass: TerminalClass;
 } {
-  const msg = failReason.toLowerCase();
-
-  if (
-    msg.includes("prominent_people") ||
-    msg.includes("content policy") ||
-    msg.includes("safety") ||
-    msg.includes("unsafe") ||
-    msg.includes("sensitive") ||
-    msg.includes("sensitive prompt") ||
-    msg.includes("sensitive word") ||
-    msg.includes("sensitive words") ||
-    msg.includes("not allowed to generate") ||
-    msg.includes("generation not allowed") ||
-    msg.includes("not permitted to generate") ||
-    msg.includes("prompt blocked") ||
-    msg.includes("prompt rejected") ||
-    msg.includes("内容敏感") ||
-    msg.includes("提示词敏感") ||
-    msg.includes("敏感词") ||
-    msg.includes("不允许生成") ||
-    msg.includes("禁止生成") ||
-    msg.includes("违规") ||
-    msg.includes("审核")
-  ) {
-    return { retryable: false, terminalClass: "content_policy" };
+  const matched = matchUpstreamErrorPattern(failReason);
+  if (matched) {
+    return { retryable: matched.retryable, terminalClass: matched.terminalClass };
   }
-
-  if (
-    msg.includes("inpaint image must match") ||
-    msg.includes("invalid_request_error") ||
-    msg.includes("image dimensions") ||
-    msg.includes("image size mismatch")
-  ) {
-    return { retryable: false, terminalClass: "provider_error" };
-  }
-
-  if (
-    msg.includes("频率受限") ||
-    msg.includes("账号频率受限") ||
-    msg.includes("rate limit") ||
-    msg.includes("too many requests") ||
-    msg.includes("try again later") ||
-    msg.includes("temporarily unavailable") ||
-    msg.includes("负载已饱和") ||
-    // 上游 429 各种文案：grok2api / nfvid 都会把 Grok 的 429 包成 "returned 429" 之类
-    /\b429\b/.test(msg) ||
-    msg.includes("returned 429") ||
-    msg.includes("upstream 429") ||
-    msg.includes("stream idle timeout") ||  // nfvid 的 60s stream timeout 也是瞬态拥塞
-    // nfvid 的输出质量守门：Grok 上游偶尔会"缩水"返回 400x736 等低分辨率视频，
-    // nfvid 检测到后会拒绝。这是瞬态质量问题，重试可能就好。
-    msg.includes("low resolution video") ||
-    msg.includes("blocked width") ||
-    msg.includes("blocked height") ||
-    msg.includes("video generation returned low")
-  ) {
-    return { retryable: true, terminalClass: "provider_error" };
-  }
-
-  if (
-    msg.includes("quota") ||
-    msg.includes("limit exceeded") ||
-    msg.includes("余额不足") ||
-    msg.includes("insufficient balance") ||
-    msg.includes("insufficient quota")
-  ) {
-    return { retryable: false, terminalClass: "quota_exceeded" };
-  }
-
-  if (
-    msg.includes("timeout") ||
-    msg.includes("timed out") ||
-    msg.includes("超时")
-  ) {
-    return { retryable: true, terminalClass: "timeout" };
-  }
-
-  if (
-    msg.includes("server error") ||
-    msg.includes("internal") ||
-    msg.includes("500") ||
-    msg.includes("服务器") ||
-    msg.includes("provider") ||
-    msg.includes("upstream error")
-  ) {
-    return { retryable: true, terminalClass: "provider_error" };
-  }
-
-  return { retryable: true, terminalClass: "unknown" };
+  return {
+    retryable: UNKNOWN_FALLBACK.retryable,
+    terminalClass: UNKNOWN_FALLBACK.terminalClass,
+  };
 }
 
 export function extractProviderErrorMessage(payload: unknown): string {
@@ -150,121 +293,13 @@ export function isRetryableOverload(status: number, message: string): boolean {
  *
  * 原始错误请同时 `console.error` 写入日志，方便我们排查；这里返回的只是给
  * 终端用户看的版本。
+ *
+ * 实现注记：本函数与 {@link classifyVideoProviderFailure} 共用 `UPSTREAM_ERROR_PATTERNS`
+ * 表 —— 新增上游错误形态时只需要往表里加一条，两个出口的行为自动一致。
  */
 export function friendlyFailMessage(rawMessage: string): string {
-  const msg = (rawMessage || "").toLowerCase();
-
-  // ── 隐私 / 真人图（最具体，先判 — Volcengine Seedance 这条最常见）──
-  if (
-    msg.includes("inputimagesensitivecontentdetected") ||
-    msg.includes("privacyinformation") ||
-    msg.includes("may contain real person") ||
-    msg.includes("real person") ||
-    msg.includes("contain person") ||
-    msg.includes("face detected") ||
-    msg.includes("人脸") ||
-    msg.includes("真人") ||
-    msg.includes("人像")
-  ) {
-    return "图片中检测到真人或隐私内容，无法生成。请使用纯产品图、卡通形象或不含真实人像的图片重试。";
-  }
-
-  // ── 上游 / 服务商配额不足（隔离用户的金额数字，导回管理员） ──
-  if (
-    msg.includes("insuficient_user_quota") ||
-    msg.includes("insufficient_user_quota") ||
-    msg.includes("insufficient_quota") ||
-    msg.includes("预扣费额度") ||
-    msg.includes("剩余额度") ||
-    msg.includes("user_quota")
-  ) {
-    return "当前模型服务额度不足，请联系管理员处理后再试。";
-  }
-
-  // ── 内容违规（不含真人那条，但 prompt 敏感词等）──
-  if (
-    msg.includes("prominent_people") ||
-    msg.includes("content policy") ||
-    msg.includes("content_unsafe") ||
-    msg.includes("safety") ||
-    msg.includes("unsafe") ||
-    msg.includes("sensitive") ||
-    msg.includes("内容敏感") ||
-    msg.includes("提示词敏感") ||
-    msg.includes("敏感词") ||
-    msg.includes("违规") ||
-    msg.includes("审核") ||
-    msg.includes("not allowed to generate") ||
-    msg.includes("prompt blocked")
-  ) {
-    return "提示词或图片涉敏感/违规内容，请调整描述或换张图片重试。";
-  }
-
-  // ── 余额 / 限额（用户层面的余额不足）──
-  if (
-    msg.includes("余额不足") ||
-    msg.includes("insufficient balance") ||
-    msg.includes("quota") ||
-    msg.includes("limit exceeded")
-  ) {
-    return "账户余额或配额不足，请充值或联系客服。";
-  }
-
-  // ── 上游"任务存在但视频未生成"——nfvid 链路偶发故障 ──
-  // 必须放在 invalid_request_error 类前面，否则会被通用上游错误吞掉
-  if (
-    /video[^a-z]*not found/i.test(msg) ||
-    /video_id[^a-z]*not found/i.test(msg) ||
-    msg.includes("'video_") && msg.includes("not found")
-  ) {
-    return "上游服务暂未交付视频（任务记录已建立但视频未生成），已自动退款。这是上游偶发故障，请稍后重试或换个模型。";
-  }
-
-  // ── 上游低分辨率回退 (Grok 偶发"缩水"输出 + nfvid 守门拒绝) ──
-  // 必须放在限流之前，因为低分辨率不算"繁忙"，是质量问题
-  if (
-    msg.includes("low resolution video") ||
-    msg.includes("blocked width") ||
-    msg.includes("blocked height") ||
-    msg.includes("video generation returned low")
-  ) {
-    return "上游生成的视频质量不达标（分辨率过低，已被自动过滤），已自动退款。这是上游偶发问题，请重新提交即可。";
-  }
-
-  // ── 限流 / 频率受限 ──
-  if (
-    msg.includes("频率受限") ||
-    msg.includes("rate limit") ||
-    msg.includes("too many requests") ||
-    msg.includes("负载已饱和") ||
-    msg.includes("temporarily unavailable") ||
-    /\b429\b/.test(msg) ||
-    msg.includes("returned 429") ||
-    msg.includes("upstream 429") ||
-    msg.includes("stream idle timeout")
-  ) {
-    return "上游服务繁忙（限流或临时拥塞），已自动退款，请稍后重试。";
-  }
-
-  // ── 超时 ──
-  if (msg.includes("timeout") || msg.includes("timed out") || msg.includes("超时")) {
-    return "生成超时，已自动退款，请稍后重试。";
-  }
-
-  // ── 上游通用错误兜底 ──
-  if (
-    msg.includes("upstream") ||
-    msg.includes("server error") ||
-    msg.includes("internal") ||
-    msg.includes("provider") ||
-    /\bhttp\s+[45]\d\d\b/i.test(msg) ||
-    msg.includes("invalid_request_error")
-  ) {
-    return "上游服务返回错误，已自动退款，请稍后重试。如多次失败请联系管理员。";
-  }
-
-  // ── 最终兜底：完全不认识的错误 ──
-  return "生成失败，已自动退款，请稍后重试或联系管理员。";
+  const matched = matchUpstreamErrorPattern(rawMessage);
+  return matched ? matched.friendly : UNKNOWN_FALLBACK.friendly;
 }
 
 export function extractVideoUrlFromPayload(result: Record<string, unknown>): string | undefined {
