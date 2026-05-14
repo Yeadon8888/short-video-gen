@@ -100,7 +100,10 @@ const PROVIDERS: Record<string, VideoProviderAdapter> = {
 };
 
 function isDuration(value: unknown): value is VideoDuration {
-  return value === 4 || value === 5 || value === 6 || value === 8 || value === 10 || value === 12 || value === 15;
+  return (
+    value === 4 || value === 5 || value === 6 || value === 8 ||
+    value === 10 || value === 12 || value === 15 || value === 16 || value === 20
+  );
 }
 
 function isOrientation(value: unknown): value is "portrait" | "landscape" {

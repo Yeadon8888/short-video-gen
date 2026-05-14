@@ -97,7 +97,8 @@ export function parseGenerateReplayPreset(searchParams: SearchParamsLike): Gener
       orientation:
         searchParams.get("orientation") === "landscape" ? "landscape" : "portrait",
       duration:
-        duration === 6 || duration === 8 || duration === 10 || duration === 15
+        duration === 4 || duration === 5 || duration === 6 || duration === 8 ||
+        duration === 10 || duration === 12 || duration === 15 || duration === 16 || duration === 20
           ? duration
           : undefined,
       count: Number.isFinite(count) && count > 0 ? count : undefined,
