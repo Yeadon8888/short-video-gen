@@ -1,4 +1,4 @@
-export type VideoDuration = 4 | 5 | 6 | 8 | 10 | 12 | 15;
+export type VideoDuration = 4 | 5 | 6 | 8 | 10 | 12 | 15 | 16 | 20;
 
 // ─── Video generation types ───
 

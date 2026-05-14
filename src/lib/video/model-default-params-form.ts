@@ -6,7 +6,7 @@ const COMMON_KEYS = new Set([
   "watermark",
 ]);
 
-const DURATION_OPTIONS = ["4", "6", "8", "10", "12", "15"] as const;
+const DURATION_OPTIONS = ["4", "6", "8", "10", "12", "15", "16", "20"] as const;
 type DurationOption = (typeof DURATION_OPTIONS)[number];
 type OrientationOption = "" | "portrait" | "landscape";
 type WatermarkOption = "inherit" | "true" | "false";
@@ -31,6 +31,8 @@ function normalizeDurationOption(value: unknown): DurationOption | "" {
   if (value === 10 || value === "10") return "10";
   if (value === 12 || value === "12") return "12";
   if (value === 15 || value === "15") return "15";
+  if (value === 16 || value === "16") return "16";
+  if (value === 20 || value === "20") return "20";
   return "";
 }
 

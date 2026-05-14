@@ -5,7 +5,7 @@ import type {
 } from "@/lib/video/service";
 import type { TaskStatusResult } from "@/lib/video/types";
 import { delayStaggeredSubmission } from "@/lib/tasks/batch-queue";
-import { isUploadGatewayEnabled, uploadSharedVideo } from "@/lib/storage/gateway";
+import { uploadSharedVideo } from "@/lib/storage/gateway";
 import {
   extractNfvidFailReason,
   extractNfvidStatus,
@@ -13,12 +13,11 @@ import {
   extractNfvidVideoUrl,
   inferNfvidCapabilities,
   NFVID_ACTIVE_STATES,
-  NFVID_CHAT_ENDPOINT,
   NFVID_DEFAULT_BASE_URL,
   NFVID_FAILURE_STATES,
   NFVID_SUCCESS_STATES,
   NFVID_VIDEOS_ENDPOINT,
-  nfvidUsesSyncChat,
+  nfvidUsesGrokForm,
   normalizeNfvidBaseUrl,
   normalizeNfvidProgress,
   type NfvidCreateResponse,
@@ -60,6 +59,10 @@ class NfvidNonRetryableError extends Error {
   }
 }
 
+/**
+ * JSON-only API request, used by the sora2 family + status polling + queryTaskStatus.
+ * Grok-imagine-family uses a separate multipart POST helper (see createViaGrokForm).
+ */
 async function apiRequest<T>(params: {
   model: VideoModelRecord;
   method: "GET" | "POST";
@@ -110,11 +113,7 @@ async function apiRequest<T>(params: {
       return payload as T;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      // Definitively non-retryable response error — bail out, do not waste
-      // retry budget on the same 400/401/403 etc.
-      if (error instanceof NfvidNonRetryableError) {
-        throw error;
-      }
+      if (error instanceof NfvidNonRetryableError) throw error;
       if (attempt < 2) {
         await new Promise((resolve) => setTimeout(resolve, 3_000 * (attempt + 1)));
         continue;
@@ -153,118 +152,151 @@ async function rehostTaskContent(params: {
 }
 
 /**
- * 同步路径下 chat-completions 直接返回视频 URL，把它镜像到 R2 让 URL 持久化、
- * 不依赖 nfvid CDN 长期可用性。URL 本身公网可下，无需 Bearer（已验证）。
+ * 推断 grok-imagine-frames 的 size 参数 —— 上游接受固定 5 种像素值。
+ * - portrait → 720x1280（默认） 或 1024x1792
+ * - landscape → 1280x720 或 1792x1024
+ * - square → 1024x1024
+ *
+ * default_params.size 优先于自动推断；providerOptions.size 又优先于 default_params.size。
  */
-async function rehostSyncChatUrl(params: {
-  upstreamUrl: string;
-  fallbackName: string;
-}): Promise<string> {
-  if (!isUploadGatewayEnabled()) return params.upstreamUrl;
-  try {
-    const fileRes = await fetch(params.upstreamUrl, {
-      signal: AbortSignal.timeout(180_000),
-    });
-    if (!fileRes.ok) return params.upstreamUrl;
-    const buffer = await fileRes.arrayBuffer();
-    const stored = await uploadSharedVideo({
-      bucket: "nfvid",
-      filename: `${params.fallbackName}.mp4`,
-      data: buffer,
-      contentType: fileRes.headers.get("content-type") ?? "video/mp4",
-    });
-    return stored.url;
-  } catch {
-    return params.upstreamUrl;
+function pickGrokFormSize(
+  orientation: "portrait" | "landscape",
+  providerOptions: Record<string, unknown>,
+): string {
+  if (typeof providerOptions.size === "string" && providerOptions.size) {
+    return providerOptions.size;
   }
+  return orientation === "portrait" ? "720x1280" : "1280x720";
 }
 
 /**
- * Synchronous chat-completions path —— 用于 nfvid 上的 Grok-lineage 模型
- * （比如 grok-imagine-video-frames）。
+ * Grok Imagine Frames 路径：multipart/form-data 异步提交。
  *
- * 行为跟 grok2api Railway 代理的 chat-completions 一致：阻塞 ~55s，视频 URL
- * 出现在 choices[0].message.content。createTasks 必须自带 immediateResults
- * 标记 SUCCESS，让 runner 跳过轮询。
+ * 关键 spec（来自 nfvid 官方）：
+ * - POST /v1/videos  Content-Type: multipart/form-data
+ * - seconds 必须是字符串（"6"/"10"/"12"/"16"/"20"）
+ * - input_reference[] 是 **二进制文件**（fetch 图片再以 Blob 上传，URL 不行）
+ *
+ * 投递后返回 task_id；之后走跟 sora2 同一条 GET /v1/videos/{id} 轮询路径。
  */
-async function createViaSyncChat(params: {
+async function createViaGrokForm(params: {
   model: VideoModelRecord;
   prompt: string;
   imageUrls: string[];
+  durationSeconds: number;
+  orientation: "portrait" | "landscape";
   count: number;
   providerOptions: Record<string, unknown>;
 }): Promise<ProviderCreateResult> {
+  const apiKey = getApiKey(params.model);
+  if (!apiKey) throw new Error("NFVID_API_KEY is not set");
+
+  const baseUrl = getBaseUrl(params.model);
   const taskIds: string[] = [];
-  const immediateResults: TaskStatusResult[] = [];
+
+  const size = pickGrokFormSize(params.orientation, params.providerOptions);
+  const resolutionName =
+    typeof params.providerOptions.resolution_name === "string"
+      ? params.providerOptions.resolution_name
+      : "720p";
+  const preset =
+    typeof params.providerOptions.preset === "string"
+      ? params.providerOptions.preset
+      : "normal";
 
   for (let index = 0; index < params.count; index += 1) {
     await delayStaggeredSubmission(index);
     const imageUrl = params.imageUrls[index] ?? params.imageUrls[0];
-    const content: unknown[] = [{ type: "text", text: params.prompt }];
-    if (imageUrl) {
-      content.push({ type: "image_url", image_url: { url: imageUrl } });
+    if (!imageUrl) {
+      throw new Error("grok-imagine-video-frames requires at least one reference image");
     }
 
-    const payload = {
-      ...params.providerOptions,
-      model: params.model.slug,
-      stream: false,
-      messages: [{ role: "user", content }],
-    };
-
-    const result = await apiRequest<{
-      id?: string;
-      choices?: Array<{ message?: { content?: string } }>;
-    }>({
-      model: params.model,
-      method: "POST",
-      path: NFVID_CHAT_ENDPOINT,
-      body: payload,
-      timeoutMs: 240_000,
+    // Fetch the image bytes — nfvid's multipart endpoint only accepts file
+    // uploads, not URLs. The image URL is either user-uploaded R2 or an
+    // image-prep output, both fetchable without auth.
+    const imgRes = await fetch(imageUrl, {
+      signal: AbortSignal.timeout(60_000),
     });
-
-    const url = result?.choices?.[0]?.message?.content?.trim();
-    if (!url || !/^https?:\/\//.test(url)) {
+    if (!imgRes.ok) {
       throw new Error(
-        `NFVid sync chat returned no video URL: ${JSON.stringify(result).slice(0, 300)}`,
+        `Failed to fetch reference image ${imageUrl}: HTTP ${imgRes.status}`,
       );
     }
-    const chatId = result.id ?? `nfvid-chat-${Date.now()}-${index}`;
+    const imgBuf = await imgRes.arrayBuffer();
+    const imgContentType = imgRes.headers.get("content-type") ?? "image/jpeg";
+    const imgExt = imgContentType.includes("png") ? "png" : "jpg";
 
-    const finalUrl = await rehostSyncChatUrl({
-      upstreamUrl: url,
-      fallbackName: `${chatId}`,
+    const form = new FormData();
+    form.append("model", params.model.slug);
+    form.append("prompt", params.prompt);
+    form.append("seconds", String(params.durationSeconds));   // upstream wants string
+    form.append("size", size);
+    form.append("resolution_name", resolutionName);
+    form.append("preset", preset);
+    form.append(
+      "input_reference[]",
+      new Blob([imgBuf], { type: imgContentType }),
+      `ref-${index}.${imgExt}`,
+    );
+
+    const submitUrl = `${baseUrl}${NFVID_VIDEOS_ENDPOINT}`;
+    const response = await fetch(submitUrl, {
+      method: "POST",
+      // Do NOT set Content-Type — fetch sets the multipart boundary automatically.
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+      signal: AbortSignal.timeout(120_000),
     });
 
-    taskIds.push(chatId);
-    immediateResults.push({
-      taskId: chatId,
-      status: "SUCCESS",
-      progress: "100%",
-      url: finalUrl,
-    });
+    const text = await response.text();
+    let payload: unknown = {};
+    if (text) {
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        payload = { raw: text.slice(0, 500) };
+      }
+    }
+
+    if (!response.ok) {
+      const message = extractProviderErrorMessage(payload);
+      throw new NfvidNonRetryableError(`HTTP ${response.status}: ${message}`);
+    }
+
+    const taskId = extractNfvidTaskId(payload as NfvidCreateResponse);
+    if (!taskId) {
+      throw new Error(
+        `NFVid grok-form task creation returned no task_id: ${JSON.stringify(payload).slice(0, 200)}`,
+      );
+    }
+    taskIds.push(taskId);
   }
 
-  return { providerTaskIds: taskIds, immediateResults };
+  // Async — runner will poll via the existing queryTaskStatus.
+  return { providerTaskIds: taskIds };
 }
 
 export const nfvidProvider: VideoProviderAdapter = {
   id: "nfvid",
+  // Grok-imagine fidelity is best with the original image, but image-prep on
+  // server side typically just resizes/normalizes — fine. Leave default true.
 
   getCapabilities(model) {
     return inferNfvidCapabilities(model);
   },
 
   async createTasks({ model, params }) {
-    const providerOptions = params.providerOptions ?? {};
+    const providerOptions = (params.providerOptions ?? {}) as Record<string, unknown>;
 
-    // Dispatch on slug: Grok-lineage models on nfvid use synchronous
-    // chat-completions; everything else uses async /v1/videos.
-    if (nfvidUsesSyncChat(model.slug)) {
-      return createViaSyncChat({
+    // Dispatch on slug: Grok Imagine Frames family uses multipart /v1/videos;
+    // sora2 family uses JSON /v1/videos. Same endpoint, different content-type.
+    if (nfvidUsesGrokForm(model.slug)) {
+      return createViaGrokForm({
         model,
         prompt: params.prompt,
         imageUrls: params.imageUrls ?? [],
+        durationSeconds: params.duration,
+        orientation: params.orientation,
         count: params.count,
         providerOptions,
       });
@@ -317,9 +349,6 @@ export const nfvidProvider: VideoProviderAdapter = {
         timeoutMs: 60_000,
       });
     } catch (error) {
-      // 上游偶尔会"丢任务"——nfvid → OpenAI Sora 链路里，超时未交付的任务会被
-      // 上游清理。后续 GET /v1/videos/{id} 返回 HTTP 400 {"code":"task_not_exist"}。
-      // 这是终态：上游已无记录、无法重试。直接报 FAILED 让 runner 退款。
       const message = error instanceof Error ? error.message : String(error);
       if (
         /HTTP\s+400/i.test(message) &&
@@ -330,7 +359,7 @@ export const nfvidProvider: VideoProviderAdapter = {
           status: "FAILED",
           progress: "0%",
           failReason:
-            "上游任务记录已丢失（task_not_exist）—— 通常是 nfvid → OpenAI Sora 链路里 GPU 任务超时被丢弃，自动退款",
+            "上游任务记录已丢失（task_not_exist）—— 通常是 nfvid → 上游链路里 GPU 任务超时被丢弃，自动退款",
           retryable: false,
           terminalClass: "provider_error",
         };

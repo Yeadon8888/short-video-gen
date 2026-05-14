@@ -156,7 +156,7 @@ export const taskGroups = pgTable("task_groups", {
   selectionMode: varchar("selection_mode", { length: 20 }),
   paramsJson: jsonb("params_json").$type<{
     orientation: "portrait" | "landscape";
-    duration: 4 | 5 | 6 | 8 | 10 | 12 | 15;
+    duration: 4 | 5 | 6 | 8 | 10 | 12 | 15 | 16 | 20;
     count: number;
     platform: "douyin" | "tiktok";
     outputLanguage?: string; // See src/lib/video/languages.ts — widened so new langs don't require a migration.
@@ -193,7 +193,7 @@ export const tasks = pgTable("tasks", {
   creditsCost: integer("credits_cost").default(0).notNull(),
   paramsJson: jsonb("params_json").$type<{
     orientation: "portrait" | "landscape";
-    duration: 4 | 5 | 6 | 8 | 10 | 12 | 15;
+    duration: 4 | 5 | 6 | 8 | 10 | 12 | 15 | 16 | 20;
     count: number;
     platform: "douyin" | "tiktok";
     outputLanguage?: string; // See src/lib/video/languages.ts — widened so new langs don't require a migration.

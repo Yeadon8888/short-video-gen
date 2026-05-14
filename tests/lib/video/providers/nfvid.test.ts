@@ -182,43 +182,40 @@ test("nfvidProvider treats HTTP 400 task_not_exist as terminal non-retryable fai
   }
 });
 
-test("nfvidProvider sync-chat dispatch: grok-imagine-video-frames uses /v1/chat/completions and returns immediate SUCCESS", async () => {
+test("nfvidProvider grok-form dispatch: grok-imagine-video-frames uses multipart /v1/videos with file upload + string seconds", async () => {
   const originalFetch = globalThis.fetch;
-  let chatHits = 0;
   let videosHits = 0;
-  let rehostHits = 0;
+  let imageFetched = false;
+  let capturedFormFields: Record<string, string> = {};
+  let capturedHasFile = false;
 
-  globalThis.fetch = (async (input) => {
+  globalThis.fetch = (async (input, init) => {
     const url = String(input);
-    if (url.endsWith("/v1/chat/completions")) {
-      chatHits += 1;
-      return new Response(
-        JSON.stringify({
-          id: "chatcmpl-abc123",
-          choices: [{
-            message: {
-              role: "assistant",
-              content: "https://cos.nfvid.vip/win/videos/test.mp4",
-            },
-          }],
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+    if (url === "https://cdn.example/product.png") {
+      imageFetched = true;
+      return new Response(new Uint8Array([255, 216, 255, 224]), {
+        status: 200,
+        headers: { "Content-Type": "image/jpeg" },
+      });
     }
     if (url.endsWith("/v1/videos")) {
       videosHits += 1;
-      return new Response(JSON.stringify({ id: "should_not_be_hit" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-    if (url === "https://cos.nfvid.vip/win/videos/test.mp4") {
-      rehostHits += 1;
-      // rehost fetch — return a tiny mp4 buffer
-      return new Response(new Uint8Array([0, 0, 0, 1]), {
-        status: 200,
-        headers: { "Content-Type": "video/mp4" },
-      });
+      // Capture form fields from FormData body
+      const body = init?.body;
+      if (body instanceof FormData) {
+        for (const [k, v] of body.entries()) {
+          if (typeof v === "string") capturedFormFields[k] = v;
+          else capturedHasFile = true;   // Blob / File entry
+        }
+      }
+      return new Response(
+        JSON.stringify({
+          id: "task_grokfrm_abc",
+          task_id: "task_grokfrm_abc",
+          status: "queued",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
     }
     return new Response("not found", { status: 404 });
   }) as typeof fetch;
@@ -229,36 +226,120 @@ test("nfvidProvider sync-chat dispatch: grok-imagine-video-frames uses /v1/chat/
         ...baseModel,
         slug: "grok-imagine-video-frames",
         name: "Grok Imagine Video Frames",
+        defaultParams: { duration: 16, allowedDurations: [6, 10, 12, 16, 20] },
       },
       params: {
         prompt: "animate this product",
         imageUrls: ["https://cdn.example/product.png"],
         orientation: "portrait",
-        duration: 10,
+        duration: 16,
         count: 1,
         model: "grok-imagine-video-frames",
       },
     });
 
-    assert.equal(chatHits, 1, "should hit chat-completions endpoint");
-    assert.equal(videosHits, 0, "should NOT hit /v1/videos for sync-chat model");
-    assert.deepEqual(result.providerTaskIds, ["chatcmpl-abc123"]);
-    assert.ok(result.immediateResults, "sync path must return immediateResults");
-    assert.equal(result.immediateResults?.length, 1);
-    assert.equal(result.immediateResults?.[0].status, "SUCCESS");
-    assert.equal(result.immediateResults?.[0].progress, "100%");
+    assert.equal(imageFetched, true, "must fetch the reference image bytes for multipart upload");
+    assert.equal(videosHits, 1, "must hit /v1/videos exactly once");
+    assert.equal(capturedHasFile, true, "must include input_reference[] file part");
+    assert.equal(capturedFormFields["model"], "grok-imagine-video-frames");
+    assert.equal(capturedFormFields["seconds"], "16", "seconds must be string per upstream spec");
+    assert.equal(capturedFormFields["size"], "720x1280", "portrait → 720x1280 default size");
+    assert.equal(capturedFormFields["resolution_name"], "720p");
+    assert.equal(capturedFormFields["preset"], "normal");
+    assert.equal(capturedFormFields["prompt"], "animate this product");
+    assert.deepEqual(result.providerTaskIds, ["task_grokfrm_abc"]);
+    // Async path — NO immediateResults, runner polls
+    assert.equal(result.immediateResults, undefined);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("nfvidProvider sync-chat: missing URL in response throws clear error", async () => {
+test("nfvidProvider grok-form: landscape orientation picks 1280x720 size by default", async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () =>
-    new Response(
-      JSON.stringify({ id: "chatcmpl-x", choices: [{ message: { content: "" } }] }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    )) as typeof fetch;
+  let capturedSize = "";
+
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (url === "https://cdn.example/wide.png") {
+      return new Response(new Uint8Array([1, 2, 3]), {
+        status: 200,
+        headers: { "Content-Type": "image/png" },
+      });
+    }
+    if (url.endsWith("/v1/videos")) {
+      const body = init?.body;
+      if (body instanceof FormData) {
+        capturedSize = String(body.get("size") ?? "");
+      }
+      return new Response(JSON.stringify({ task_id: "t_x" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response("nf", { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    await nfvidProvider.createTasks({
+      model: { ...baseModel, slug: "grok-imagine-video-frames" },
+      params: {
+        prompt: "x",
+        imageUrls: ["https://cdn.example/wide.png"],
+        orientation: "landscape",
+        duration: 10,
+        count: 1,
+        model: "grok-imagine-video-frames",
+      },
+    });
+    assert.equal(capturedSize, "1280x720");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("nfvidProvider grok-form: provider_options.size overrides orientation-based default", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedSize = "";
+
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (url === "https://cdn.example/p.jpg") {
+      return new Response(new Uint8Array([1]), { status: 200, headers: { "Content-Type": "image/jpeg" } });
+    }
+    if (url.endsWith("/v1/videos")) {
+      const body = init?.body;
+      if (body instanceof FormData) capturedSize = String(body.get("size") ?? "");
+      return new Response(JSON.stringify({ task_id: "t_y" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response("nf", { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    await nfvidProvider.createTasks({
+      model: { ...baseModel, slug: "grok-imagine-video-frames" },
+      params: {
+        prompt: "x",
+        imageUrls: ["https://cdn.example/p.jpg"],
+        orientation: "portrait",
+        duration: 20,
+        count: 1,
+        model: "grok-imagine-video-frames",
+        providerOptions: { size: "1024x1792" },   // override
+      },
+    });
+    assert.equal(capturedSize, "1024x1792", "explicit size in providerOptions wins");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("nfvidProvider grok-form: missing image throws clear error", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response("nf", { status: 404 })) as typeof fetch;
 
   try {
     await assert.rejects(
@@ -266,14 +347,14 @@ test("nfvidProvider sync-chat: missing URL in response throws clear error", asyn
         model: { ...baseModel, slug: "grok-imagine-video-frames" },
         params: {
           prompt: "test",
-          imageUrls: ["https://cdn.example/a.png"],
+          imageUrls: [],   // no images
           orientation: "portrait",
           duration: 10,
           count: 1,
           model: "grok-imagine-video-frames",
         },
       }),
-      /returned no video URL/,
+      /requires at least one reference image/,
     );
   } finally {
     globalThis.fetch = originalFetch;

@@ -6,30 +6,43 @@ import type { VideoDuration } from "@/lib/video/types";
 
 export const NFVID_DEFAULT_BASE_URL = "https://api.nfvid.vip";
 export const NFVID_VIDEOS_ENDPOINT = "/v1/videos";
-export const NFVID_CHAT_ENDPOINT = "/v1/chat/completions";
 export const NFVID_SUCCESS_STATES = new Set(["SUCCESS", "SUCCEEDED", "COMPLETED", "DONE"]);
 export const NFVID_FAILURE_STATES = new Set(["FAILED", "FAILURE", "ERROR", "CANCELLED", "CANCELED"]);
 export const NFVID_ACTIVE_STATES = new Set(["PENDING", "QUEUED", "PROCESSING", "RUNNING", "IN_PROGRESS"]);
 
 /**
- * 部分 nfvid 模型走同步 chat-completions 而非异步 /v1/videos：
- * - 调用 POST /v1/chat/completions
- * - 阻塞等待 ~55s
- * - 视频 URL 在 choices[0].message.content
+ * nfvid 上的 Grok Imagine 家族模型，走 multipart/form-data 异步路径：
+ *   POST /v1/videos  Content-Type: multipart/form-data
+ *     model            = "grok-imagine-video-frames"
+ *     prompt           = <text>
+ *     seconds          = "6" | "10" | "12" | "16" | "20"  ← 上游要 string
+ *     size             = "720x1280" | "1280x720" | "1024x1024" | "1024x1792" | "1792x1024"
+ *     resolution_name  = "720p"
+ *     preset           = "normal"
+ *     input_reference[]= <binary image file>   ← 多 part 上传，不是 URL
  *
- * 跟 Railway 上 chenyme/grok2api 走的是同一套 OpenAI-compat 协议（这些都是
- * 把 Grok Imagine 包装成 chat 的产物），但 nfvid 是独立账号、独立配额，
- * 不能把它跟 grok2api 池容量算到一起。
+ * 状态轮询和下载共用现有的 NFVID_VIDEOS_ENDPOINT：
+ *   GET /v1/videos/{taskId}          状态 + 元数据
+ *   GET /v1/videos/{taskId}/content  视频文件（带 Auth）
+ *
+ * 历史上我曾把它走 /v1/chat/completions（同步），上游虽然能出片但忽略
+ * duration / size 等参数，所以删掉那条路径。
  */
-export const NFVID_SYNC_CHAT_MODELS = new Set<string>([
+export const NFVID_GROK_FORM_MODELS = new Set<string>([
   "grok-imagine-video-frames",
 ]);
 
-export function nfvidUsesSyncChat(slug: string): boolean {
-  return NFVID_SYNC_CHAT_MODELS.has(slug);
+export function nfvidUsesGrokForm(slug: string): boolean {
+  return NFVID_GROK_FORM_MODELS.has(slug);
 }
 
-const VALID_DURATIONS = new Set<VideoDuration>([4, 5, 6, 8, 10, 12, 15]);
+/**
+ * Grok Imagine Frames 官方支持的视频长度（秒）—— 来自 nfvid spec。
+ * 上游接受 string，capability 这里给 number 仅用于 UI 计算。
+ */
+export const NFVID_GROK_ALLOWED_SECONDS: VideoDuration[] = [6, 10, 12, 16, 20];
+
+const VALID_DURATIONS = new Set<VideoDuration>([4, 5, 6, 8, 10, 12, 15, 16, 20]);
 
 export interface NfvidCreateResponse {
   id?: string;
