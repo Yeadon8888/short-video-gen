@@ -250,6 +250,9 @@ export async function processPendingBatchTasks(params: {
               modelId: claimedTask.modelId,
               soraPrompt,
               paramsJson: claimedTask.paramsJson,
+              creditsCost: claimedTask.creditsCost,
+              deliveryDeadlineAt,
+              taskGroupId: claimedTask.taskGroupId,
             },
             { limit: slotSubmissionLimit },
           );

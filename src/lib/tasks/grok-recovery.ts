@@ -162,6 +162,9 @@ export async function recoverStuckGrokBatchTasks(options?: {
             modelId: task.modelId,
             soraPrompt: task.soraPrompt,
             paramsJson: task.paramsJson,
+            creditsCost: task.creditsCost,
+            deliveryDeadlineAt,
+            taskGroupId: task.taskGroupId,
           },
           { limit: slotSubmissionLimit },
         );

@@ -25,7 +25,10 @@ import {
   delayStaggeredSubmission,
   getMaxBatchSlotSubmissionsPerTick,
 } from "@/lib/tasks/batch-queue";
-import { shouldRetrySlot } from "@/lib/tasks/retry-policy";
+import {
+  decideSubmissionFailureOutcome,
+  shouldRetrySlot,
+} from "@/lib/tasks/retry-policy";
 import { recomputeTaskGroupSummary } from "@/lib/tasks/groups";
 import { persistGeneratedVideos } from "@/lib/tasks/result-assets";
 import type { VideoDuration } from "@/lib/video/types";
@@ -83,29 +86,81 @@ export function resolveSlotSubmissionClaim(
   };
 }
 
-async function releaseSlotSubmissionClaim(params: {
-  slot: Pick<TaskSlot, "id" | "status" | "attemptCount">;
+/**
+ * 提交阶段失败处理（createVideoTasks 抛错 / 返回空 providerTaskIds）。
+ *
+ * 决策走纯函数 {@link decideSubmissionFailureOutcome}：
+ * - terminate_failed：slot → failed + completedAt，触发 finalize（含退款）
+ * - retry_pending：slot 退回 pending，**保留** attemptCount=claim.nextAttemptNo
+ *   让 10 分钟预算 + 5 次 polling 上限都能生效，避免老 bug 的无限循环
+ *
+ * 写 lastFailReason 用的是脱敏后的 friendlyFailMessage 结果（重试中加前缀
+ * "提交失败，将自动重试："），最终终止时直接用 friendlyMessage。
+ *
+ * 原始 error 同步打 console.error，方便排查。
+ */
+async function handleSubmissionFailure(params: {
+  task: Pick<
+    Task,
+    | "id"
+    | "userId"
+    | "creditsCost"
+    | "deliveryDeadlineAt"
+    | "taskGroupId"
+  >;
+  slot: Pick<TaskSlot, "id" | "createdAt">;
   claimedAttemptNo: number;
-}) {
+  rawMessage: string;
+}): Promise<void> {
+  const decision = decideSubmissionFailureOutcome({
+    rawMessage: params.rawMessage,
+    slotCreatedAt: params.slot.createdAt,
+    deliveryDeadlineAt: params.task.deliveryDeadlineAt ?? new Date(0),
+  });
+
+  // 状态机锁：只有"还是我刚才那个 claim"才允许我落更新，避免与并发 tick 抢占冲突
+  const claimGuard = and(
+    eq(taskSlots.id, params.slot.id),
+    eq(taskSlots.status, "submitted"),
+    eq(taskSlots.attemptCount, params.claimedAttemptNo),
+    sql`NOT EXISTS (
+      SELECT 1 FROM ${taskItems}
+      WHERE ${taskItems.slotId} = ${params.slot.id}
+        AND ${taskItems.attemptNo} = ${params.claimedAttemptNo}
+    )`,
+  );
+
+  if (decision.kind === "retry_pending") {
+    await db
+      .update(taskSlots)
+      .set({
+        status: "pending",
+        // KEY: 保留 nextAttemptNo（不再像旧实现回滚），让 10 分钟预算能算上这次失败
+        attemptCount: params.claimedAttemptNo,
+        lastFailReason: decision.lastFailReason,
+        lastTerminalClass: decision.terminalClass,
+      })
+      .where(claimGuard);
+    return;
+  }
+
+  // kind === "terminate_failed"
   await db
     .update(taskSlots)
     .set({
-      status: params.slot.status,
-      attemptCount: params.slot.attemptCount,
-      lastFailReason: "视频供应商提交失败，等待重试",
+      status: "failed",
+      attemptCount: params.claimedAttemptNo,
+      lastFailReason: decision.lastFailReason,
+      lastTerminalClass: decision.terminalClass,
+      completedAt: new Date(),
     })
-    .where(
-      and(
-        eq(taskSlots.id, params.slot.id),
-        eq(taskSlots.status, "submitted"),
-        eq(taskSlots.attemptCount, params.claimedAttemptNo),
-        sql`NOT EXISTS (
-          SELECT 1 FROM ${taskItems}
-          WHERE ${taskItems.slotId} = ${params.slot.id}
-            AND ${taskItems.attemptNo} = ${params.claimedAttemptNo}
-        )`,
-      ),
-    );
+    .where(claimGuard);
+
+  // 触发任务级 finalize（含退款 + 状态推进），让用户立刻看到结果
+  await maybeFinalizeFulfillmentTask(params.task);
+  if (params.task.taskGroupId) {
+    await recomputeTaskGroupSummary(params.task.taskGroupId);
+  }
 }
 
 export async function reconcileSuccessfulSlotItems(taskId: string): Promise<number> {
@@ -184,7 +239,15 @@ export async function reconcileSuccessfulSlotItems(taskId: string): Promise<numb
 export async function submitSlotAttempt(params: {
   task: Pick<
     Task,
-    "id" | "userId" | "modelId" | "soraPrompt" | "paramsJson"
+    | "id"
+    | "userId"
+    | "modelId"
+    | "soraPrompt"
+    | "paramsJson"
+    // 下面这些只为 handleSubmissionFailure → maybeFinalizeFulfillmentTask 准备
+    | "creditsCost"
+    | "deliveryDeadlineAt"
+    | "taskGroupId"
   >;
   slot: TaskSlot;
 }): Promise<{ providerTaskId: string; itemId: string } | null> {
@@ -243,18 +306,21 @@ export async function submitSlotAttempt(params: {
     });
     providerTaskIds = submitted.providerTaskIds;
     immediateResults = submitted.immediateResults;
-  } catch {
-    await releaseSlotSubmissionClaim({
-      slot,
+    if (providerTaskIds.length === 0) {
+      // 上游 200 OK 但没给 providerTaskId，等价于上游"软失败"
+      throw new Error("Upstream returned no provider task IDs");
+    }
+  } catch (error) {
+    const rawMessage = error instanceof Error ? error.message : String(error);
+    console.error(
+      `[fulfillment] slot ${slot.id} submission failed (attempt ${claim.nextAttemptNo}):`,
+      rawMessage,
+    );
+    await handleSubmissionFailure({
+      task,
+      slot: { id: slot.id, createdAt: slot.createdAt },
       claimedAttemptNo: claim.nextAttemptNo,
-    });
-    return null;
-  }
-
-  if (providerTaskIds.length === 0) {
-    await releaseSlotSubmissionClaim({
-      slot,
-      claimedAttemptNo: claim.nextAttemptNo,
+      rawMessage,
     });
     return null;
   }
@@ -362,10 +428,9 @@ export async function advanceSlotOnResult(params: {
       .set({ successfulCount: newSuccessCount })
       .where(eq(tasks.id, task.id));
 
-    await maybeFinalizeFulfillmentTask({
-      ...task,
-      successfulCount: newSuccessCount,
-    });
+    // maybeFinalizeFulfillmentTask 内部会从 DB 重新算 successCount，不依赖入参，
+    // 这里直接传 task 即可（无需 spread + overwrite successfulCount）
+    await maybeFinalizeFulfillmentTask(task);
 
     await refillPendingSlotsIfCapacityAvailable(task.id);
     if (task.taskGroupId) {
@@ -433,14 +498,33 @@ export async function advanceSlotOnResult(params: {
   });
 
   if (!attempt) {
-    await db
+    // submitSlotAttempt 返回 null 的两种可能：
+    //   (a) 提交抛错 → handleSubmissionFailure 把 slot 改成 'pending'（retry_pending）
+    //       或 'failed'（terminate_failed），并按需 finalize。两种结果 status 都已经
+    //       **不是 'submitted'** 了，这里**不能**再压一次 failed/finalize。
+    //   (b) 早 return（model/paramsJson 缺失、claim 抢失败）→ 走不到 try/catch，slot 仍
+    //       停在 'submitted' 状态。这种"卡 submitted 没动"才需要兜底标 failed。
+    // 用 status='submitted' guard 区分两条路径，避免把 retry_pending 错杀 + 避免重复退款。
+    const [forciblyFailed] = await db
       .update(taskSlots)
-      .set({ status: "failed", completedAt: new Date() })
-      .where(eq(taskSlots.id, slot.id));
-    await maybeFinalizeFulfillmentTask(task);
-    if (task.taskGroupId) {
-      await recomputeTaskGroupSummary(task.taskGroupId);
+      .set({
+        status: "failed",
+        completedAt: new Date(),
+        lastFailReason: sql`COALESCE(${taskSlots.lastFailReason}, '提交失败')`,
+      })
+      .where(
+        and(eq(taskSlots.id, slot.id), eq(taskSlots.status, "submitted")),
+      )
+      .returning({ id: taskSlots.id });
+
+    if (forciblyFailed) {
+      await maybeFinalizeFulfillmentTask(task);
+      if (task.taskGroupId) {
+        await recomputeTaskGroupSummary(task.taskGroupId);
+      }
+      return { slotStatus: "failed" };
     }
+    // handleSubmissionFailure 已经处理（pending 或 failed），不重复 finalize
     return { slotStatus: "failed" };
   }
 
@@ -462,6 +546,9 @@ export async function refillPendingSlotsIfCapacityAvailable(taskId: string): Pro
       soraPrompt: tasks.soraPrompt,
       paramsJson: tasks.paramsJson,
       status: tasks.status,
+      creditsCost: tasks.creditsCost,
+      deliveryDeadlineAt: tasks.deliveryDeadlineAt,
+      taskGroupId: tasks.taskGroupId,
     })
     .from(tasks)
     .where(eq(tasks.id, taskId))
@@ -512,16 +599,7 @@ export async function refillPendingSlotsIfCapacityAvailable(taskId: string): Pro
  * Handles refund for unfulfilled slots.
  */
 export async function maybeFinalizeFulfillmentTask(
-  task: Pick<
-    Task,
-    | "id"
-    | "userId"
-    | "creditsCost"
-    | "fulfillmentMode"
-    | "requestedCount"
-    | "successfulCount"
-    | "taskGroupId"
-  >,
+  task: Pick<Task, "id" | "userId" | "creditsCost" | "taskGroupId">,
 ): Promise<boolean> {
   await reconcileSuccessfulSlotItems(task.id);
 
@@ -697,7 +775,17 @@ export async function expireDeadlineSlots(
  * Called right after task creation to kick off the first round.
  */
 export async function submitPendingSlots(
-  task: Pick<Task, "id" | "userId" | "modelId" | "soraPrompt" | "paramsJson">,
+  task: Pick<
+    Task,
+    | "id"
+    | "userId"
+    | "modelId"
+    | "soraPrompt"
+    | "paramsJson"
+    | "creditsCost"
+    | "deliveryDeadlineAt"
+    | "taskGroupId"
+  >,
   options?: { limit?: number },
 ): Promise<string[]> {
   await reconcileSuccessfulSlotItems(task.id);
