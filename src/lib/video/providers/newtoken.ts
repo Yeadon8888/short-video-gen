@@ -11,6 +11,7 @@ import {
   isRetryableOverload,
   toPortraitLandscapeAspectRatio,
 } from "./shared";
+import { mirrorReferenceImagesToCnOss } from "./cn-oss-mirror";
 
 const DEFAULT_BASE_URL = "https://api.newtoken.club";
 const VIDEOS_ENDPOINT = "/v1/videos";
@@ -202,7 +203,16 @@ export const newtokenProvider: VideoProviderAdapter = {
   async createTasks({ model, params }) {
     const taskIds: string[] = [];
     const providerOptions = params.providerOptions ?? {};
-    const images = params.imageUrls ?? [];
+    const rawImages = params.imageUrls ?? [];
+
+    // sora-pro 走 Seedance(境内),omni_reference 只认它能拉到的 https URL,
+    // 而我们的 CF 图床在境内拉不动 —— 仅对此模型把参考图镜像到国内 OSS。
+    // 其他模型/渠道一律不动。
+    const images =
+      model.slug.trim().toLowerCase() === "sora-pro" && rawImages.length > 0
+        ? await mirrorReferenceImagesToCnOss(rawImages)
+        : rawImages;
+
     const resolution =
       typeof providerOptions.resolution === "string" &&
       providerOptions.resolution.trim()
