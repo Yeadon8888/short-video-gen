@@ -10,6 +10,7 @@ import { dashscopeProvider } from "./providers/dashscope";
 import { grok2apiProvider } from "./providers/grok2api";
 import { nfvidProvider } from "./providers/nfvid";
 import { volc302Provider } from "./providers/volc302";
+import { newtokenProvider } from "./providers/newtoken";
 import { prepareImagesForProvider } from "./image-prep";
 
 export interface VideoProviderCapabilities {
@@ -97,6 +98,7 @@ const PROVIDERS: Record<string, VideoProviderAdapter> = {
   grok2api: grok2apiProvider,
   nfvid: nfvidProvider,
   volc302: volc302Provider,
+  newtoken: newtokenProvider,
 };
 
 function isDuration(value: unknown): value is VideoDuration {
