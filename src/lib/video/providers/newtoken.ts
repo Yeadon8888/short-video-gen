@@ -24,7 +24,11 @@ const ACTIVE_STATES = new Set(["QUEUED", "IN_PROGRESS", "PENDING", "PROCESSING"]
 const SLUG_DURATIONS: Record<string, VideoDuration> = {
   "veo-3-1": 8,
   "sora-pro": 15,
+  "sora-2": 12,
 };
+
+// 走 Seedance(境内)后端、需要把参考图镜像到国内 OSS 的模型。
+const CN_MIRROR_SLUGS = new Set(["sora-pro", "sora-2"]);
 
 function normalizeNewtokenBaseUrl(raw: string): string {
   const trimmed = raw.trim().replace(/\/+$/, "");
@@ -205,11 +209,11 @@ export const newtokenProvider: VideoProviderAdapter = {
     const providerOptions = params.providerOptions ?? {};
     const rawImages = params.imageUrls ?? [];
 
-    // sora-pro 走 Seedance(境内),omni_reference 只认它能拉到的 https URL,
-    // 而我们的 CF 图床在境内拉不动 —— 仅对此模型把参考图镜像到国内 OSS。
-    // 其他模型/渠道一律不动。
+    // Seedance(境内)的 omni_reference 只认它能拉到的 https URL,而我们的 CF
+    // 图床在境内拉不动 —— 仅对这些模型把参考图镜像到国内 OSS。其他不动。
     const images =
-      model.slug.trim().toLowerCase() === "sora-pro" && rawImages.length > 0
+      CN_MIRROR_SLUGS.has(model.slug.trim().toLowerCase()) &&
+      rawImages.length > 0
         ? await mirrorReferenceImagesToCnOss(rawImages)
         : rawImages;
 
