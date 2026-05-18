@@ -28,7 +28,9 @@ const SLUG_DURATIONS: Record<string, VideoDuration> = {
 };
 
 // 走 Seedance(境内)后端、需要把参考图镜像到国内 OSS 的模型。
-const CN_MIRROR_SLUGS = new Set(["sora-pro", "sora-2"]);
+// 仅 sora-pro —— 实测验证过镜像前 CF 超时必失败、镜像后正常生成。
+// sora-2 虽同在 newtoken,但不需要镜像(按产品确认)。
+const CN_MIRROR_SLUGS = new Set(["sora-pro"]);
 
 function normalizeNewtokenBaseUrl(raw: string): string {
   const trimmed = raw.trim().replace(/\/+$/, "");
