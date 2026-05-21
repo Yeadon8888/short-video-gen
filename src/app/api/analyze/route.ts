@@ -9,7 +9,10 @@ import {
 } from "@/lib/tikhub";
 import { requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { tasks } from "@/lib/db/schema";
+import { tasks, creditTxns, users } from "@/lib/db/schema";
+import { and, eq, sql } from "drizzle-orm";
+import { getActiveModelByCapability } from "@/lib/models/repository";
+import { MODEL_CAPABILITIES } from "@/lib/models/capabilities";
 import type { OutputLanguage } from "@/lib/video/types";
 
 export const maxDuration = 300;
@@ -58,6 +61,22 @@ export async function POST(req: NextRequest) {
       try {
         if (!body.url?.trim()) {
           send({ type: "error", message: "请输入视频链接。" });
+          send({ type: "done" });
+          controller.close();
+          return;
+        }
+
+        // ── 解析计费模型 + 余额预检(失败则不走分析,不浪费上游成本)──
+        const analyzeModel = await getActiveModelByCapability({
+          capability: MODEL_CAPABILITIES.scriptGeneration,
+        });
+        const cost = analyzeModel.creditsPerGen;
+        if (user.credits < cost) {
+          send({
+            type: "error",
+            code: "INSUFFICIENT_CREDITS",
+            message: `积分不足。视频分析需要 ${cost} 积分,当前余额 ${user.credits}。`,
+          });
           send({ type: "done" });
           controller.close();
           return;
@@ -122,32 +141,58 @@ export async function POST(req: NextRequest) {
 
         log(`分析完成，共 ${scriptResult.shots?.length ?? 0} 个镜头`);
 
-        // ── Save to tasks table ──
-        const [task] = await db
-          .insert(tasks)
-          .values({
-            userId: user.id,
-            type: "analyze",
-            status: "done",
-            inputText: rawUrl,
-            videoSourceUrl: rawUrl,
-            soraPrompt: scriptResult.full_sora_prompt,
-            scriptJson: scriptResult,
-            creditsCost: 0,
-            completedAt: new Date(),
-            paramsJson: {
-              orientation: "portrait" as const,
-              duration: 8 as const,
-              count: 1,
-              platform,
-              outputLanguage,
-              model: "gemini",
-              sourceMode: "url" as const,
-            },
-          })
-          .returning({ id: tasks.id });
+        // ── 保存 task + 扣费(失败不扣:仅在分析成功后执行)──
+        // 原子扣减带 `credits >= cost` 守门,防并发超扣;扣减成功才记 creditsCost
+        // 与流水。极端并发竞争下扣减失败则按 0 计费,不因此让已交付的分析作废。
+        const { taskId } = await db.transaction(async (tx) => {
+          const [deducted] = await tx
+            .update(users)
+            .set({ credits: sql`${users.credits} - ${cost}` })
+            .where(and(eq(users.id, user.id), sql`${users.credits} >= ${cost}`))
+            .returning({ credits: users.credits });
+          const charged = Boolean(deducted);
 
-        send({ type: "result", data: scriptResult, taskId: task.id });
+          const [task] = await tx
+            .insert(tasks)
+            .values({
+              userId: user.id,
+              type: "analyze",
+              status: "done",
+              inputText: rawUrl,
+              videoSourceUrl: rawUrl,
+              soraPrompt: scriptResult.full_sora_prompt,
+              scriptJson: scriptResult,
+              creditsCost: charged ? cost : 0,
+              modelId: analyzeModel.id,
+              completedAt: new Date(),
+              paramsJson: {
+                orientation: "portrait" as const,
+                duration: 8 as const,
+                count: 1,
+                platform,
+                outputLanguage,
+                model: analyzeModel.slug,
+                sourceMode: "url" as const,
+              },
+            })
+            .returning({ id: tasks.id });
+
+          if (charged) {
+            await tx.insert(creditTxns).values({
+              userId: user.id,
+              type: "consume",
+              amount: -cost,
+              reason: `视频分析 (${analyzeModel.slug})`,
+              modelId: analyzeModel.id,
+              taskId: task.id,
+              balanceAfter: deducted.credits,
+            });
+          }
+
+          return { taskId: task.id };
+        });
+
+        send({ type: "result", data: scriptResult, taskId });
         send({ type: "done" });
         controller.close();
       } catch (e) {
